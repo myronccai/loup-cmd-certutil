@@ -1,0 +1,84 @@
+@mode(host.dual)
+
+# certutil's success and failure lines. A failure is reported as the
+# HRESULT that ends the verb, with its symbolic name and Windows' message:
+#
+#   CertUtil: -hashfile command FAILED: 0x80070002 (WIN32: 2 ERROR_FILE_NOT_FOUND)
+#   CertUtil: The system cannot find the file specified.
+#
+# and the HRESULT, a negative 32-bit number, is the exit status.
+
+from hash.common import (hex_word);
+
+pub const HR_FILE_NOT_FOUND: int = 0x80070002;
+pub const HR_PATH_NOT_FOUND: int = 0x80070003;
+pub const HR_ACCESS_DENIED: int = 0x80070005;
+pub const HR_INVALID_DATA: int = 0x8007000D;
+pub const HR_FILE_EXISTS: int = 0x80070050;
+pub const HR_INVALID_PARAMETER: int = 0x80070057;
+pub const HR_BAD_ALGID: int = 0x80090008;
+
+# The symbolic part of the FAILED line.
+pub func hresult_name(hr: int): string {
+    if (hr == HR_FILE_NOT_FOUND) {
+        return "WIN32: 2 ERROR_FILE_NOT_FOUND";
+    } else if (hr == HR_PATH_NOT_FOUND) {
+        return "WIN32: 3 ERROR_PATH_NOT_FOUND";
+    } else if (hr == HR_ACCESS_DENIED) {
+        return "WIN32: 5 ERROR_ACCESS_DENIED";
+    } else if (hr == HR_INVALID_DATA) {
+        return "WIN32: 13 ERROR_INVALID_DATA";
+    } else if (hr == HR_FILE_EXISTS) {
+        return "WIN32: 80 ERROR_FILE_EXISTS";
+    } else if (hr == HR_INVALID_PARAMETER) {
+        return "WIN32: 87 ERROR_INVALID_PARAMETER";
+    }
+    return str(exit_code(hr)) + " NTE_BAD_ALGID";
+}
+
+# Windows' message for the HRESULT.
+pub func hresult_message(hr: int): string {
+    if (hr == HR_FILE_NOT_FOUND) {
+        return "The system cannot find the file specified.";
+    } else if (hr == HR_PATH_NOT_FOUND) {
+        return "The system cannot find the path specified.";
+    } else if (hr == HR_ACCESS_DENIED) {
+        return "Access is denied.";
+    } else if (hr == HR_INVALID_DATA) {
+        return "The data is invalid.";
+    } else if (hr == HR_FILE_EXISTS) {
+        return "The file exists.";
+    } else if (hr == HR_INVALID_PARAMETER) {
+        return "The parameter is incorrect.";
+    }
+    return "Invalid algorithm specified.";
+}
+
+# The exit status for an HRESULT: the 32-bit value as a signed number
+# (0x80070002 is -2147024894; a Linux shell sees its low 8 bits, 2).
+pub func exit_code(hr: int): int {
+    if (hr >= 0x80000000) {
+        return hr - 0x100000000;
+    }
+    return hr;
+}
+
+# The two lines that report a failed verb (`verb` without its dash).
+pub func failure_lines(verb: string, hr: int): list[string] {
+    return [
+        "CertUtil: -" + verb + " command FAILED: 0x" + hex_word(hr, 8) + " (" + hresult_name(hr) + ")",
+        "CertUtil: " + hresult_message(hr),
+    ];
+}
+
+pub func success_line(verb: string): string {
+    return "CertUtil: -" + verb + " command completed successfully.";
+}
+
+# Prints a failure on standard error and returns its exit status.
+pub func fail(verb: string, hr: int): int {
+    for (line in failure_lines(verb, hr)) {
+        printErr(line);
+    }
+    return exit_code(hr);
+}

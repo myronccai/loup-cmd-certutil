@@ -1,0 +1,142 @@
+@mode(host.dual)
+
+# The hexadecimal formats of certutil -encodehex (the CryptBinaryToString
+# HEX types), 16 bytes per line, lines ending in CR LF:
+#
+#   4   hex                 48 65 6c 6c 6f 2c 20 77  6f 72 6c 64
+#   5   hex and text        48 65 6c 6c 6f 2c 20 77  6f 72 6c 64   Hello, world
+#   10  offset and hex      0000<TAB>48 65 6c 6c ...
+#   11  offset, hex, text   0000<TAB>48 65 6c 6c ...  (the default)
+#   12  raw hex             48656c6c6f2c20776f726c64
+#
+# -decodehex reads any of them back.
+
+from codec.base64 import (CRLF);
+from hash.common import (hex_word);
+
+pub const HEX: int = 4;
+pub const HEX_ASCII: int = 5;
+pub const HEX_ADDR: int = 10;
+pub const HEX_ASCII_ADDR: int = 11;
+pub const HEX_RAW: int = 12;
+
+# The width of the padded hex column: 16 * "xx", 15 separators, one more
+# space between the two halves.
+const HEX_WIDTH: int = 48;
+
+pub func valid_hex_type(kind: int): bool {
+    return kind == HEX or kind == HEX_ASCII or kind == HEX_ADDR or kind == HEX_ASCII_ADDR or kind == HEX_RAW;
+}
+
+# "00" .. "ff", built once: per-byte strings would stay allocated natively.
+func byte_strings(): list[string] {
+    var out: list[string] = [];
+    for (b in 0..256) {
+        out.push(hex_word(b, 2));
+    }
+    return out;
+}
+
+# The text column's character for each byte: itself when printable ASCII,
+# else ".".
+func text_chars(): list[string] {
+    var out: list[string] = [];
+    for (b in 0..256) {
+        out.push(if (b >= 32 and b < 127) { str(char.of(b)) } else { "." });
+    }
+    return out;
+}
+
+# An offset as hexadecimal with at least 4 digits.
+pub func address(offset: int): string {
+    var digits = 4;
+    while (offset >> (digits * 4) > 0) {
+        digits += 1;
+    }
+    return hex_word(offset, digits);
+}
+
+# The text certutil -encodehex writes for the bytes in format `kind`.
+pub func hex_text(data: bytes, kind: int): string {
+    let hexes = byte_strings();
+    let texts = text_chars();
+    var out: list[string] = [];
+    let n = data.len();
+    if (kind == HEX_RAW) {
+        for (i in 0..n) {
+            out.push(hexes[data[i]]);
+        }
+        if (n > 0) {
+            out.push(CRLF);
+        }
+        return out.join("");
+    }
+    var start = 0;
+    while (start < n) {
+        let count = if (n - start < 16) { n - start } else { 16 };
+        if (kind == HEX_ADDR or kind == HEX_ASCII_ADDR) {
+            out.push(address(start));
+            out.push("\t");
+        }
+        var width = 0;
+        for (k in 0..count) {
+            if (k > 0) {
+                out.push(if (k == 8) { "  " } else { " " });
+                width += if (k == 8) { 2 } else { 1 };
+            }
+            out.push(hexes[data[start + k]]);
+            width += 2;
+        }
+        if (kind == HEX_ASCII or kind == HEX_ASCII_ADDR) {
+            while (width < HEX_WIDTH) {
+                out.push(" ");
+                width += 1;
+            }
+            out.push("   ");
+            for (k in 0..count) {
+                out.push(texts[data[start + k]]);
+            }
+        }
+        out.push(CRLF);
+        start += count;
+    }
+    return out.join("");
+}
+
+# Reads hexadecimal text in any of the formats back into byte values:
+# an offset up to a TAB is skipped, and in spaced formats only the hex
+# column (the first 48 characters) is read. Returns [-1] for text that is
+# not hexadecimal.
+pub func hex_decode(text: string): list[int] {
+    var out: list[int] = [];
+    var high = -1;
+    for (line in text.replace("\r", "").split("\n")) {
+        var body = line;
+        let tab = body.index_of("\t");
+        if (tab >= 0) {
+            body = body.slice(tab + 1);
+        }
+        if (body.index_of(" ") >= 0 and body.len() > HEX_WIDTH) {
+            body = body.slice(0, HEX_WIDTH);
+        }
+        for (ch in body.toLowerCase()) {
+            if (ch == " ") {
+                continue;
+            }
+            let d = "0123456789abcdef".index_of(ch);
+            if (d < 0) {
+                return [-1];
+            }
+            if (high < 0) {
+                high = d;
+            } else {
+                out.push(high * 16 + d);
+                high = -1;
+            }
+        }
+    }
+    if (high >= 0) {
+        return [-1];
+    }
+    return out;
+}

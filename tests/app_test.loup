@@ -1,25 +1,40 @@
 @mode(host.dual)
 
 # Exit statuses of the whole command line. These tests print the program's
-# normal output and error messages.
+# normal output.
 
 from debug.assert import (expectEq);
-from appinfo import (EXIT_OK, EXIT_USAGE);
+from io.fs import (createDir, writeText, removeDir, isDir, isFile);
+from appinfo import (EXIT_OK);
 from cli.app import (run);
+from commands.results import (exit_code, HR_FILE_NOT_FOUND, HR_INVALID_PARAMETER, HR_FILE_EXISTS,
+    HR_BAD_ALGID, HR_PATH_NOT_FOUND);
 
-func test_version_succeeds(): void {
+func test_help_and_version(): void {
     expectEq(run(["--version"]), EXIT_OK, "--version");
+    expectEq(run(["-?"]), EXIT_OK, "-?");
+    expectEq(run(["-encode", "-?"]), EXIT_OK, "verb -?");
 }
 
-func test_hello_succeeds(): void {
-    expectEq(run(["hello", "tests"]), EXIT_OK, "hello NAME");
+func test_errors(): void {
+    expectEq(run(["-bogus"]), exit_code(HR_INVALID_PARAMETER), "unknown arg");
+    expectEq(run(["-hashfile"]), exit_code(HR_INVALID_PARAMETER), "missing file");
+    expectEq(run(["-hashfile", "no_such_file_x.txt"]), exit_code(HR_FILE_NOT_FOUND), "no such file");
+    expectEq(run(["-hashfile", "no_such_dir_x/a.txt"]), exit_code(HR_PATH_NOT_FOUND), "no such directory");
 }
 
-func test_unknown_command_is_usage_error(): void {
-    expectEq(run(["bogus"]), EXIT_USAGE, "unknown command");
-}
-
-func test_missing_command_is_usage_error(): void {
-    let none: list[string] = [];
-    expectEq(run(none), EXIT_USAGE, "no command");
+func test_verbs(): void {
+    let root = "build/tmp/app_certutil";
+    if (isDir(root)) {
+        removeDir(root);
+    }
+    createDir(root);
+    writeText(root + "/a.txt", "hello");
+    expectEq(run(["-hashfile", root + "/a.txt", "sha256"]), EXIT_OK, "hash");
+    expectEq(run(["-hashfile", root + "/a.txt", "md2"]), exit_code(HR_BAD_ALGID), "unsupported algorithm");
+    expectEq(run(["-encode", root + "/a.txt", root + "/a.b64"]), EXIT_OK, "encode");
+    expectEq(run(["-encode", root + "/a.txt", root + "/a.b64"]), exit_code(HR_FILE_EXISTS), "exists");
+    expectEq(run(["-decode", root + "/a.b64", root + "/a.out"]), EXIT_OK, "decode");
+    expectEq(readText(root + "/a.out"), "hello", "round trip");
+    removeDir(root);
 }

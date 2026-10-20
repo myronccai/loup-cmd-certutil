@@ -1,11 +1,14 @@
 @mode(host.dual)
 
-from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE, EXIT_USAGE);
+from appinfo import (EXIT_OK);
 from cli.args import (Options, parse_args);
-from cli.usage import (usage, version_line);
-from commands.hello import (run_hello);
+from cli.usage import (usage, verb_usage, version_line);
+from commands.hashfile import (run_hashfile);
+from commands.convert import (run_encode, run_decode, run_encodehex, run_decodehex);
+from commands.results import (HR_INVALID_PARAMETER, exit_code, hresult_message);
 
-# Parses argv, runs the selected command and returns the exit status.
+# Parses argv, runs the verb and returns the exit status (certutil's
+# ERRORLEVEL: 0 or an HRESULT).
 pub func run(argv: list[string]): int {
     let opts = match parse_args(argv) {
         Ok(parsed) => parsed,
@@ -14,41 +17,62 @@ pub func run(argv: list[string]): int {
         },
     };
 
-    if (opts.help) {
-        println(usage());
-        return EXIT_OK;
-    }
     if (opts.version) {
         println(version_line());
         return EXIT_OK;
     }
-    if (opts.verbose) {
-        printErr(i"{$ APP_NAME $}: command '{$ opts.command $}', operands {$ opts.operands $}");
+    if (opts.help) {
+        if (opts.command.len() > 0) {
+            println(verb_usage(opts.command));
+        } else {
+            println(usage());
+        }
+        return EXIT_OK;
+    }
+    if (opts.unknown.len() > 0) {
+        return usage_error("CertUtil: Unknown arg: " + opts.unknown);
+    }
+    if (opts.verbs > 1) {
+        return usage_error("CertUtil: Too many verbs: one at a time.");
     }
 
     try {
         return dispatch(opts);
     } catch (Exception as e) {
-        printErr(i"{$ APP_NAME $}: error: {$ e.message $}");
-        return EXIT_FAILURE;
+        printErr("CertUtil: " + e.message);
+        return exit_code(HR_INVALID_PARAMETER);
     }
 }
 
-# Add new commands here and to the help text in cli/usage.loup.
+# The verbs, as in the template's dispatcher. Add a verb here, to VERBS in
+# cli/args.loup and to the help text in cli/usage.loup.
 func dispatch(opts: Options): int {
-    return match opts.command {
-        "hello" => run_hello(opts),
-        "help" => {
-            println(usage());
-            EXIT_OK
+    match opts.command {
+        "hashfile" => {
+            return run_hashfile(opts);
         },
-        "" => usage_error("no command given"),
-        other => usage_error(i"unknown command '{$ other $}'"),
-    };
+        "encode" => {
+            return run_encode(opts);
+        },
+        "decode" => {
+            return run_decode(opts);
+        },
+        "encodehex" => {
+            return run_encodehex(opts);
+        },
+        "decodehex" => {
+            return run_decodehex(opts);
+        },
+        _ => {
+            # No verb: show what certutil can do here.
+            println(usage());
+            return EXIT_OK;
+        },
+    }
 }
 
 func usage_error(msg: string): int {
-    printErr(i"{$ APP_NAME $}: {$ msg $}");
-    printErr(i"Try '{$ APP_NAME $} --help' for more information.");
-    return EXIT_USAGE;
+    printErr(msg);
+    printErr("CertUtil: " + hresult_message(HR_INVALID_PARAMETER));
+    return exit_code(HR_INVALID_PARAMETER);
 }

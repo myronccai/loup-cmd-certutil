@@ -1,0 +1,42 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from hash.common import (rotl32, rotr32, shr64, rotr64, word64, hex_word, padded_tail);
+
+func same(got: string, want: string, what: string): void {
+    expect(got == want, what + ": got '" + got + "', want '" + want + "'");
+}
+
+func test_32_bit_rotations(): void {
+    expectEq(rotl32(0x80000001, 1), 3, "rotate left wraps the top bit");
+    expectEq(rotr32(1, 1), 0x80000000, "rotate right wraps the low bit");
+    expectEq(rotl32(0x12345678, 8), 0x34567812, "bytes");
+}
+
+func test_64_bit_words(): void {
+    let w = word64(0x80000000, 1);
+    same(hex_word(w, 16), "8000000000000001", "word from halves (negative int)");
+    same(hex_word(shr64(w, 4), 16), "0800000000000000", "logical shift right");
+    same(hex_word(rotr64(w, 4), 16), "1800000000000000", "rotate right");
+    same(hex_word(w + w, 16), "0000000000000002", "addition wraps at 2^64");
+}
+
+func test_hex_word(): void {
+    same(hex_word(0xab, 2), "ab", "byte");
+    same(hex_word(0x1f, 4), "001f", "leading zeros");
+}
+
+func test_padded_tail(): void {
+    let empty = b"";
+    expectEq(padded_tail(empty, 64, 8, false).len(), 64, "empty: one block");
+    let tail = padded_tail(b"abc", 64, 8, false);
+    expectEq(tail[3], 0x80, "the 1 bit");
+    expectEq(tail[63], 24, "bit length, big-endian");
+    let little = padded_tail(b"abc", 64, 8, true);
+    expectEq(little[56], 24, "bit length, little-endian");
+    let b55 = b"0123456789012345678901234567890123456789012345678901234";
+    expectEq(padded_tail(b55, 64, 8, false).len(), 64, "55 bytes fit in one block");
+    let b56 = b"01234567890123456789012345678901234567890123456789012345";
+    expectEq(padded_tail(b56, 64, 8, false).len(), 128, "56 bytes need two");
+    expectEq(padded_tail(b"abc", 128, 16, false).len(), 128, "SHA-512 block");
+}

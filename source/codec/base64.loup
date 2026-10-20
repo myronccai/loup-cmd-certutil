@@ -1,0 +1,144 @@
+@mode(host.dual)
+
+# Base64 (RFC 4648) as certutil writes and reads it: -encode frames the
+# text with certificate header and footer lines and breaks it into lines of
+# 64 characters, all ending in CR LF; -decode accepts that framing (any
+# `-----BEGIN ...-----` line) or bare base64, and ignores whitespace.
+
+pub const CERTIFICATE: string = "CERTIFICATE";
+pub const CRLF: string = "\r\n";
+
+const ALPHABET: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+# The base64 characters of the bytes, one string per character, with
+# `break_after` > 0 adding a CR LF after every that many characters and
+# after the last one. Characters come from a table: in native builds every
+# temporary string stays allocated, and slicing a long string by character
+# position is linear, so the text is never cut up afterwards.
+func base64_pieces(data: bytes, break_after: int): list[string] {
+    var out: list[string] = [];
+    var table: list[string] = [];
+    for (ch in ALPHABET) {
+        table.push(ch);
+    }
+    var group: list[string] = ["", "", "", ""];
+    var column = 0;
+    let n = data.len();
+    var i = 0;
+    while (i < n) {
+        let left = n - i;
+        let b1 = if (left > 1) { data[i + 1] } else { 0 };
+        let b2 = if (left > 2) { data[i + 2] } else { 0 };
+        let v = (data[i] << 16) | (b1 << 8) | b2;
+        group[0] = table[(v >> 18) & 63];
+        group[1] = table[(v >> 12) & 63];
+        group[2] = if (left > 1) { table[(v >> 6) & 63] } else { "=" };
+        group[3] = if (left > 2) { table[v & 63] } else { "=" };
+        for (piece in group) {
+            out.push(piece);
+            column += 1;
+            if (break_after > 0 and column == break_after) {
+                out.push(CRLF);
+                column = 0;
+            }
+        }
+        i += 3;
+    }
+    if (break_after > 0 and column > 0) {
+        out.push(CRLF);
+    }
+    return out;
+}
+
+# The base64 text of the bytes, without line breaks.
+pub func base64_encode(data: bytes): string {
+    return base64_pieces(data, 0).join("");
+}
+
+# The base64 text in lines of 64 characters, each ending in CR LF, between
+# `-----BEGIN LABEL-----` and `-----END LABEL-----` lines unless the label
+# is "".
+pub func framed_text(data: bytes, label: string): string {
+    var out: list[string] = [];
+    if (label.len() > 0) {
+        out.push("-----BEGIN " + label + "-----" + CRLF);
+    }
+    out.push(base64_pieces(data, 64).join(""));
+    if (label.len() > 0) {
+        out.push("-----END " + label + "-----" + CRLF);
+    }
+    return out.join("");
+}
+
+# The text certutil -encode writes: the base64 between certificate header
+# and footer lines.
+pub func certificate_text(data: bytes): string {
+    return framed_text(data, CERTIFICATE);
+}
+
+# The base64 payload of a text: the lines between a `-----BEGIN` line and
+# the next `-----END` line when there is one, else every line.
+pub func payload(text: string): string {
+    let lines = text.replace("\r", "").split("\n");
+    var begin = -1;
+    for (k in 0..lines.len()) {
+        if (lines[k].trim().startsWith("-----BEGIN")) {
+            begin = k;
+            break;
+        }
+    }
+    var out: list[string] = [];
+    var k = begin + 1;
+    while (k < lines.len()) {
+        let line = lines[k].trim();
+        if (begin >= 0 and line.startsWith("-----END")) {
+            break;
+        }
+        out.push(line);
+        k += 1;
+    }
+    return out.join("");
+}
+
+# Decodes base64 text (whitespace ignored, padding optional). Returns the
+# byte values, or a list holding -1 when the text is not base64.
+pub func base64_decode(text: string): list[int] {
+    var values: list[int] = [];
+    var pad = 0;
+    for (ch in text) {
+        if (ch == " " or ch == "\t" or ch == "\r" or ch == "\n") {
+            continue;
+        }
+        if (ch == "=") {
+            pad += 1;
+            continue;
+        }
+        let v = ALPHABET.index_of(ch);
+        if (v < 0 or pad > 0) {
+            return [-1];
+        }
+        values.push(v);
+    }
+    if (pad > 2 or values.len() % 4 == 1 or (pad > 0 and (values.len() + pad) % 4 != 0)) {
+        return [-1];
+    }
+    var out: list[int] = [];
+    var i = 0;
+    while (i < values.len()) {
+        let left = values.len() - i;
+        let a = values[i];
+        let b = if (left > 1) { values[i + 1] } else { 0 };
+        let c = if (left > 2) { values[i + 2] } else { 0 };
+        let d = if (left > 3) { values[i + 3] } else { 0 };
+        let v = (a << 18) | (b << 12) | (c << 6) | d;
+        out.push((v >> 16) & 255);
+        if (left > 2) {
+            out.push((v >> 8) & 255);
+        }
+        if (left > 3) {
+            out.push(v & 255);
+        }
+        i += 4;
+    }
+    return out;
+}

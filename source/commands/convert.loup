@@ -1,0 +1,175 @@
+@mode(host.dual)
+
+# certutil's conversion verbs: -encode / -decode (base64 with certificate
+# framing) and -encodehex / -decodehex (hex dumps, or another
+# CryptBinaryToString type). Each reads InFile, writes OutFile (an existing
+# one only with -f) and reports the lengths:
+#
+#   Input Length = 5
+#   Output Length = 66
+#   CertUtil: -encode command completed successfully.
+
+from appinfo import (EXIT_OK);
+from cli.args import (Options);
+from cli.usage import (verb_usage);
+from codec.base64 import (CERTIFICATE, base64_decode, certificate_text, framed_text, payload);
+from codec.hexdump import (HEX_ASCII_ADDR, hex_decode, hex_text, valid_hex_type);
+from commands.files import (input_problem, output_problem);
+from commands.results import (HR_ACCESS_DENIED, HR_INVALID_DATA, HR_INVALID_PARAMETER, fail,
+    success_line);
+from io.fs import (exists);
+from win.paths import (fs_path);
+from win.switches import (parse_int_value);
+
+# The base64 types of CryptBinaryToString and their framing labels.
+pub const B64_HEADER: int = 0;        # -----BEGIN CERTIFICATE-----
+pub const B64_PLAIN: int = 1;         # no header
+pub const B64_REQUEST: int = 3;       # -----BEGIN NEW CERTIFICATE REQUEST-----
+pub const B64_CRL: int = 9;           # -----BEGIN X509 CRL-----
+
+func base64_label(kind: int): string {
+    if (kind == B64_HEADER) {
+        return CERTIFICATE;
+    } else if (kind == B64_REQUEST) {
+        return "NEW CERTIFICATE REQUEST";
+    } else if (kind == B64_CRL) {
+        return "X509 CRL";
+    }
+    return "";
+}
+
+func is_base64_type(kind: int): bool {
+    return kind == B64_HEADER or kind == B64_PLAIN or kind == B64_REQUEST or kind == B64_CRL;
+}
+
+# Whether -encodehex / -decodehex support the type.
+pub func valid_type(kind: int): bool {
+    return is_base64_type(kind) or valid_hex_type(kind);
+}
+
+# The text -encodehex writes for the bytes in a supported type.
+pub func encoded_text(data: bytes, kind: int): string {
+    if (is_base64_type(kind)) {
+        return framed_text(data, base64_label(kind));
+    }
+    return hex_text(data, kind);
+}
+
+# The bytes -decodehex reads from text in a supported type ([-1] when the
+# text is not in that form).
+pub func decoded_values(text: string, kind: int): list[int] {
+    if (is_base64_type(kind)) {
+        return base64_decode(payload(text));
+    }
+    return hex_decode(text);
+}
+
+# Whether decoding failed.
+pub func is_bad(values: list[int]): bool {
+    return values.len() == 1 and values[0] < 0;
+}
+
+func report(input_length: int, output_length: int, verb: string): int {
+    println("Input Length = " + str(input_length));
+    println("Output Length = " + str(output_length));
+    println(success_line(verb));
+    return EXIT_OK;
+}
+
+# The common checks: the argument count, the type (when allowed), the
+# input file, the output file. Returns the type, or -1 after reporting a
+# failure (then `status` holds the exit status).
+func check(opts: Options, verb: string, allow_type: bool, edits status: list[int]): int {
+    let n = opts.operands.len();
+    let most = if (allow_type) { 3 } else { 2 };
+    var kind = HEX_ASCII_ADDR;
+    if (n < 2 or n > most) {
+        printErr(verb_usage(verb));
+        status[0] = fail(verb, HR_INVALID_PARAMETER);
+        return -1;
+    }
+    if (n == 3) {
+        kind = parse_int_value(opts.operands[2]) ?? -1;
+        if (!valid_type(kind)) {
+            status[0] = fail(verb, HR_INVALID_PARAMETER);
+            return -1;
+        }
+    }
+    let problem = input_problem(fs_path(opts.operands[0]));
+    if (problem != 0) {
+        status[0] = fail(verb, problem);
+        return -1;
+    }
+    let out_problem = output_problem(fs_path(opts.operands[1]), opts.force);
+    if (out_problem != 0) {
+        status[0] = fail(verb, out_problem);
+        return -1;
+    }
+    return kind;
+}
+
+# Writes text output and reports.
+func finish_text(verb: string, input_length: int, out: string, text: string): int {
+    writeText(out, text);
+    return report(input_length, text.byteLength(), verb);
+}
+
+# Writes byte output (verified: native writeBytes fails silently) and
+# reports.
+func finish_bytes(verb: string, input_length: int, out: string, values: list[int]): int {
+    if (values.len() == 0) {
+        writeText(out, "");
+    } else {
+        writeBytes(out, bytesFromInts(values));
+    }
+    if (!exists(out)) {
+        return fail(verb, HR_ACCESS_DENIED);
+    }
+    return report(input_length, values.len(), verb);
+}
+
+pub func run_encode(opts: Options): int {
+    var status = [0];
+    if (check(opts, "encode", false, edits: status) < 0) {
+        return status[0];
+    }
+    let data = readBytes(fs_path(opts.operands[0]));
+    return finish_text("encode", data.len(), fs_path(opts.operands[1]), certificate_text(data));
+}
+
+pub func run_decode(opts: Options): int {
+    var status = [0];
+    if (check(opts, "decode", false, edits: status) < 0) {
+        return status[0];
+    }
+    let text = readText(fs_path(opts.operands[0]));
+    let values = base64_decode(payload(text));
+    if (is_bad(values) or values.len() == 0) {
+        return fail("decode", HR_INVALID_DATA);
+    }
+    return finish_bytes("decode", text.byteLength(), fs_path(opts.operands[1]), values);
+}
+
+pub func run_encodehex(opts: Options): int {
+    var status = [0];
+    let kind = check(opts, "encodehex", true, edits: status);
+    if (kind < 0) {
+        return status[0];
+    }
+    let data = readBytes(fs_path(opts.operands[0]));
+    return finish_text("encodehex", data.len(), fs_path(opts.operands[1]), encoded_text(data, kind));
+}
+
+pub func run_decodehex(opts: Options): int {
+    var status = [0];
+    let kind = check(opts, "decodehex", true, edits: status);
+    if (kind < 0) {
+        return status[0];
+    }
+    let text = readText(fs_path(opts.operands[0]));
+    let values = decoded_values(text, kind);
+    if (is_bad(values)) {
+        return fail("decodehex", HR_INVALID_DATA);
+    }
+    return finish_bytes("decodehex", text.byteLength(), fs_path(opts.operands[1]), values);
+}

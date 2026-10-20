@@ -1,0 +1,68 @@
+@mode(host.dual)
+
+# certutil -hashfile InFile [HashAlgorithm]: prints the file's hash in
+# lower-case hexadecimal, between a header and the success line:
+#
+#   SHA256 hash of a.txt:
+#   2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+#   CertUtil: -hashfile command completed successfully.
+
+from appinfo import (EXIT_OK);
+from cli.args import (Options);
+from cli.usage import (verb_usage);
+from commands.files import (input_problem);
+from commands.results import (HR_BAD_ALGID, HR_INVALID_PARAMETER, fail, success_line);
+from hash.md5 import (md5_hex);
+from hash.sha1 import (sha1_hex);
+from hash.sha256 import (sha256_hex);
+from hash.sha512 import (sha384_hex, sha512_hex);
+from win.paths import (display_path, fs_path);
+
+pub const DEFAULT_ALGORITHM: string = "SHA1";
+
+# The algorithm's name as certutil prints it, or "" when it is not
+# supported here.
+pub func canonical_algorithm(name: string): string {
+    let upper = name.toUpperCase();
+    if (upper == "MD5" or upper == "SHA1" or upper == "SHA256" or upper == "SHA384"
+        or upper == "SHA512") {
+        return upper;
+    }
+    return "";
+}
+
+# The digest of the data in hexadecimal, for a canonical algorithm name.
+pub func hash_hex(algorithm: string, data: bytes): string {
+    if (algorithm == "MD5") {
+        return md5_hex(data);
+    } else if (algorithm == "SHA256") {
+        return sha256_hex(data);
+    } else if (algorithm == "SHA384") {
+        return sha384_hex(data);
+    } else if (algorithm == "SHA512") {
+        return sha512_hex(data);
+    }
+    return sha1_hex(data);
+}
+
+pub func run_hashfile(opts: Options): int {
+    let n = opts.operands.len();
+    if (n < 1 or n > 2) {
+        printErr(verb_usage("hashfile"));
+        return fail("hashfile", HR_INVALID_PARAMETER);
+    }
+    let algorithm = if (n == 2) { canonical_algorithm(opts.operands[1]) } else { DEFAULT_ALGORITHM };
+    if (algorithm.len() == 0) {
+        return fail("hashfile", HR_BAD_ALGID);
+    }
+    let path = fs_path(opts.operands[0]);
+    let problem = input_problem(path);
+    if (problem != 0) {
+        return fail("hashfile", problem);
+    }
+    let digest = hash_hex(algorithm, readBytes(path));
+    println(algorithm + " hash of " + display_path(opts.operands[0]) + ":");
+    println(digest);
+    println(success_line("hashfile"));
+    return EXIT_OK;
+}

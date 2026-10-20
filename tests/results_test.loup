@@ -1,0 +1,27 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from commands.results import (failure_lines, success_line, exit_code, HR_FILE_NOT_FOUND,
+    HR_INVALID_DATA, HR_BAD_ALGID, HR_FILE_EXISTS);
+
+func same(got: string, want: string, what: string): void {
+    expect(got == want, what + ": got '" + got + "', want '" + want + "'");
+}
+
+func test_failure_lines(): void {
+    same(failure_lines("hashfile", HR_FILE_NOT_FOUND).join("|"),
+        "CertUtil: -hashfile command FAILED: 0x80070002 (WIN32: 2 ERROR_FILE_NOT_FOUND)|CertUtil: The system cannot find the file specified.",
+        "file not found");
+    same(failure_lines("decode", HR_INVALID_DATA)[0],
+        "CertUtil: -decode command FAILED: 0x8007000d (WIN32: 13 ERROR_INVALID_DATA)", "lower-case hex");
+    same(failure_lines("hashfile", HR_BAD_ALGID).join("|"),
+        "CertUtil: -hashfile command FAILED: 0x80090008 (-2146893816 NTE_BAD_ALGID)|CertUtil: Invalid algorithm specified.",
+        "bad algorithm");
+    same(failure_lines("encode", HR_FILE_EXISTS)[1], "CertUtil: The file exists.", "exists");
+}
+
+func test_success_and_codes(): void {
+    same(success_line("encode"), "CertUtil: -encode command completed successfully.", "success");
+    expectEq(exit_code(HR_FILE_NOT_FOUND), -2147024894, "negative HRESULT");
+    expectEq(exit_code(HR_FILE_NOT_FOUND) & 255, 2, "what a Linux shell sees");
+}

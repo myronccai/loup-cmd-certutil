@@ -1,64 +1,42 @@
 @mode(host.dual)
 
 from debug.assert import (expect, expectEq);
-from cli.args import (parse_args, DEFAULT_GREETING);
+from cli.args import (parse_args, certutil_switches, VERBS);
 
-func test_no_arguments(): void {
-    let none: list[string] = [];
-    let opts = parse_args(none).unwrap();
-    expectEq(opts.command, "", "no command");
-    expectEq(opts.operands.len(), 0, "no operands");
-    expectEq(opts.greeting, DEFAULT_GREETING, "default greeting");
-    expect(!opts.help and !opts.version and !opts.verbose and !opts.shout, "no flags set");
+func same(got: string, want: string, what: string): void {
+    expect(got == want, what + ": got '" + got + "', want '" + want + "'");
 }
 
-func test_command_and_operands(): void {
-    let opts = parse_args(["hello", "Ann"]).unwrap();
-    expectEq(opts.command, "hello", "command");
-    expectEq(opts.operands.len(), 1, "one operand");
-    expectEq(opts.operands[0], "Ann", "operand");
+func test_verbs(): void {
+    expectEq(VERBS.len(), 5, "five verbs");
+    expectEq(certutil_switches().len(), 7, "verbs and -f -v");
+    let opts = parse_args(["-hashfile", "a.txt", "SHA256"]).unwrap();
+    same(opts.command, "hashfile", "verb");
+    same(opts.operands.join(","), "a.txt,SHA256", "arguments");
+    same(parse_args(["/EncodeHex", "a", "b"]).unwrap().command, "encodehex", "/ and any case");
+    same(parse_args(["-ENCODE", "a", "b"]).unwrap().command, "encode", "not encodehex");
 }
 
-func test_flags_anywhere(): void {
-    let opts = parse_args(["-v", "hello", "--shout", "Ann"]).unwrap();
-    expect(opts.verbose, "verbose");
-    expect(opts.shout, "shout");
-    expectEq(opts.command, "hello", "command");
-    expectEq(opts.operands[0], "Ann", "operand");
+func test_options(): void {
+    let opts = parse_args(["-f", "-v", "-decode", "a", "b"]).unwrap();
+    expect(opts.force, "-f");
+    same(opts.command, "decode", "verb after options");
+    expectEq(opts.verbs, 1, "one verb");
+    expectEq(parse_args(["-encode", "-decode"]).unwrap().verbs, 2, "two verbs");
+}
+
+func test_unknown_and_paths(): void {
+    same(parse_args(["-bogus", "a"]).unwrap().unknown, "-bogus", "unknown -word");
+    let opts = parse_args(["-hashfile", "/tmp/a.txt"]).unwrap();
+    same(opts.unknown, "", "a /path is not an option");
+    same(opts.operands[0], "/tmp/a.txt", "path");
+    same(parse_args(["-hashfile", "--", "-x"]).unwrap().unknown, "", "after --");
 }
 
 func test_help_and_version(): void {
-    expect(parse_args(["--help"]).unwrap().help, "--help");
-    expect(parse_args(["-h"]).unwrap().help, "-h");
+    expect(parse_args(["-?"]).unwrap().help, "-?");
+    let verb_help = parse_args(["-hashfile", "-?"]).unwrap();
+    expect(verb_help.help, "verb -?");
+    same(verb_help.command, "hashfile", "for that verb");
     expect(parse_args(["--version"]).unwrap().version, "--version");
-    expect(parse_args(["-V"]).unwrap().version, "-V");
-}
-
-func test_value_option_forms(): void {
-    expectEq(parse_args(["-g", "Hi"]).unwrap().greeting, "Hi", "-g VALUE");
-    expectEq(parse_args(["--greeting", "Hi"]).unwrap().greeting, "Hi", "--greeting VALUE");
-    expectEq(parse_args(["--greeting=a=b"]).unwrap().greeting, "a=b", "--greeting=VALUE keeps '='");
-}
-
-func test_double_dash_ends_options(): void {
-    let opts = parse_args(["hello", "--", "--shout"]).unwrap();
-    expect(!opts.shout, "--shout after -- is an operand");
-    expectEq(opts.operands[0], "--shout", "operand");
-}
-
-func test_lone_dash_is_operand(): void {
-    let opts = parse_args(["hello", "-"]).unwrap();
-    expectEq(opts.operands[0], "-", "operand");
-}
-
-func test_unknown_option(): void {
-    expectEq(parse_args(["--nope"]).unwrap_err(), "unknown option '--nope'", "error message");
-}
-
-func test_missing_value(): void {
-    expectEq(parse_args(["-g"]).unwrap_err(), "option '-g' requires a value", "error message");
-}
-
-func test_flag_with_value(): void {
-    expectEq(parse_args(["--shout=1"]).unwrap_err(), "option '--shout' does not take a value", "error message");
 }

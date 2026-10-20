@@ -1,0 +1,100 @@
+@mode(host.dual)
+
+# Helpers shared by the hash cores. Every value is a Loup `int` (64 bits,
+# wrapping on overflow): 32-bit words are kept in 0..2^32-1 by masking,
+# 64-bit words use the whole int. Sized integers (uint32, ...) would throw
+# on overflow, so they are not used.
+
+pub const MASK32: int = 0xFFFFFFFF;
+
+# Rotates a 32-bit word left.
+pub func rotl32(x: int, n: int): int {
+    return ((x << n) | (x >> (32 - n))) & MASK32;
+}
+
+# Rotates a 32-bit word right.
+pub func rotr32(x: int, n: int): int {
+    return ((x >> n) | (x << (32 - n))) & MASK32;
+}
+
+# Shifts a 64-bit word right without sign extension (1 <= n <= 63).
+pub func shr64(x: int, n: int): int {
+    return (x >> n) & ((1 << (64 - n)) - 1);
+}
+
+# Rotates a 64-bit word right (1 <= n <= 63).
+pub func rotr64(x: int, n: int): int {
+    return shr64(x, n) | (x << (64 - n));
+}
+
+# A 64-bit word from two 32-bit halves.
+pub func word64(hi: int, lo: int): int {
+    return (hi << 32) | (lo & MASK32);
+}
+
+const HEX: string = "0123456789abcdef";
+
+# Lower-case hexadecimal of the low `nibbles` 4-bit groups of x, most
+# significant first.
+pub func hex_word(x: int, nibbles: int): string {
+    var parts: list[string] = [];
+    var shift = (nibbles - 1) * 4;
+    while (shift >= 0) {
+        let d = (x >> shift) & 15;
+        parts.push(HEX.slice(d, d + 1));
+        shift -= 4;
+    }
+    return parts.join("");
+}
+
+# Lower-case hexadecimal of bytes (values 0..255).
+pub func hex_bytes(values: list[int]): string {
+    var parts: list[string] = [];
+    for (v in values) {
+        parts.push(hex_word(v, 2));
+    }
+    return parts.join("");
+}
+
+# Copies `count` bytes of data starting at `offset` into buf[0..count].
+pub func load_block(data: bytes, offset: int, count: int, edits buf: list[int]): void {
+    for (k in 0..count) {
+        buf[k] = data[offset + k];
+    }
+}
+
+# The padded tail of a message for a Merkle-Damgard hash: the bytes after
+# the last full block, 0x80, zeros, and the bit length in `len_bytes`
+# bytes (big-endian, or little-endian for MD5). One or two blocks.
+pub func padded_tail(data: bytes, block: int, len_bytes: int, little_endian: bool): list[int] {
+    let n = data.len();
+    let full = (n / block) * block;
+    var tail: list[int] = [];
+    for (k in full..n) {
+        tail.push(data[k]);
+    }
+    tail.push(0x80);
+    while (tail.len() % block != block - len_bytes) {
+        tail.push(0);
+    }
+    # The bit length: n * 8 fits in 64 bits; longer length fields get
+    # leading zeros.
+    let bits = n * 8;
+    var lenb: list[int] = [];
+    for (k in 0..len_bytes) {
+        let shift = k * 8;
+        lenb.push(if (shift < 64) { (bits >> shift) & 0xFF } else { 0 });
+    }
+    if (little_endian) {
+        for (v in lenb) {
+            tail.push(v);
+        }
+    } else {
+        var k = len_bytes - 1;
+        while (k >= 0) {
+            tail.push(lenb[k]);
+            k -= 1;
+        }
+    }
+    return tail;
+}

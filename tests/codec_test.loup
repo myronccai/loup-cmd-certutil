@@ -1,0 +1,87 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from codec.base64 import (base64_encode, base64_decode, certificate_text, framed_text, payload);
+from codec.hexdump import (hex_text, hex_decode, address, HEX, HEX_ASCII, HEX_ADDR, HEX_ASCII_ADDR,
+    HEX_RAW);
+
+func same(got: string, want: string, what: string): void {
+    expect(got == want, what + ": got '" + got + "', want '" + want + "'");
+}
+
+func ints(values: list[int]): string {
+    var parts: list[string] = [];
+    for (v in values) {
+        parts.push(str(v));
+    }
+    return parts.join(",");
+}
+
+func test_base64_rfc4648(): void {
+    same(base64_encode(b""), "", "empty");
+    same(base64_encode(b"f"), "Zg==", "f");
+    same(base64_encode(b"fo"), "Zm8=", "fo");
+    same(base64_encode(b"foo"), "Zm9v", "foo");
+    same(base64_encode(b"foob"), "Zm9vYg==", "foob");
+    same(base64_encode(b"foobar"), "Zm9vYmFy", "foobar");
+}
+
+func test_base64_decode(): void {
+    same(ints(base64_decode("Zm9vYmFy")), "102,111,111,98,97,114", "foobar");
+    same(ints(base64_decode("Zm9vYg==")), "102,111,111,98", "padding");
+    same(ints(base64_decode("Zm9vYg")), "102,111,111,98", "padding is optional");
+    same(ints(base64_decode("Zm9v\r\n Yg==")), "102,111,111,98", "whitespace ignored");
+    same(ints(base64_decode("Zm9v!")), "-1", "bad character");
+    same(ints(base64_decode("Zg=v")), "-1", "data after padding");
+    same(ints(base64_decode("Z")), "-1", "one character is not enough");
+}
+
+func test_certificate_framing(): void {
+    let crlf = "\r\n";
+    same(certificate_text(b"hello"),
+        "-----BEGIN CERTIFICATE-----" + crlf + "aGVsbG8=" + crlf + "-----END CERTIFICATE-----" + crlf,
+        "short");
+    let text = framed_text(b"0123456789012345678901234567890123456789012345678", "");
+    same(text, "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3" + crlf + "OA==" + crlf,
+        "64 characters per line, no header");
+    same(framed_text(b"", "X509 CRL"), "-----BEGIN X509 CRL-----" + crlf + "-----END X509 CRL-----" + crlf,
+        "empty, other label");
+}
+
+func test_payload(): void {
+    same(payload("-----BEGIN CERTIFICATE-----\r\naGVs\r\nbG8=\r\n-----END CERTIFICATE-----\r\nafter"),
+        "aGVsbG8=", "between the lines");
+    same(payload("junk\n-----BEGIN X-----\nQQ==\n-----END X-----\n"), "QQ==", "any label");
+    same(payload("aGVs\nbG8=\n"), "aGVsbG8=", "no framing");
+}
+
+func test_hex_formats(): void {
+    let crlf = "\r\n";
+    let data = b"Hello, world!\n\x00\xff";
+    same(hex_text(b"Hi", HEX_RAW), "4869" + crlf, "raw");
+    same(hex_text(b"Hi", HEX), "48 69" + crlf, "hex");
+    same(hex_text(b"Hi", HEX_ADDR), "0000\t48 69" + crlf, "offset and hex");
+    # "48 69" is padded to the 48-character hex column.
+    let pad = " ".repeat(43);
+    same(hex_text(b"Hi", HEX_ASCII_ADDR), "0000\t48 69" + pad + "   Hi" + crlf, "offset, hex, text");
+    same(hex_text(b"Hi", HEX_ASCII), "48 69" + pad + "   Hi" + crlf, "hex and text");
+    same(hex_text(data, HEX_ASCII_ADDR),
+        "0000\t48 65 6c 6c 6f 2c 20 77  6f 72 6c 64 21 0a 00 ff   Hello, world!..." + crlf,
+        "a full line, the halves, unprintable bytes");
+    same(hex_text(b"", HEX_ASCII_ADDR), "", "empty");
+}
+
+func test_address(): void {
+    same(address(0), "0000", "four digits");
+    same(address(0x1230), "1230", "offset");
+    same(address(0x10000), "10000", "more digits when needed");
+}
+
+func test_hex_decode(): void {
+    same(ints(hex_decode("4869\r\n")), "72,105", "raw");
+    same(ints(hex_decode("48 69  4a\r\n")), "72,105,74", "spaced");
+    let line = "0000\t48 69                                            Hi\r\n";
+    same(ints(hex_decode(line)), "72,105", "offset and text columns are skipped");
+    same(ints(hex_decode("486")), "-1", "odd digit count");
+    same(ints(hex_decode("zz")), "-1", "not hexadecimal");
+}

@@ -1,0 +1,41 @@
+@mode(host.dual)
+
+# Checks made before reading or writing a file, so that every failure has
+# certutil's HRESULT. (In native builds of Loup 1.26.0 a failed read or
+# write cannot be caught, and some writes fail silently.)
+
+from io.fs import (exists, isDir, isFile);
+from win.paths import (parent_dir);
+from commands.results import (HR_ACCESS_DENIED, HR_FILE_EXISTS, HR_FILE_NOT_FOUND,
+    HR_PATH_NOT_FOUND);
+
+# The HRESULT that reading `path` (fs form) would fail with, or 0.
+pub func input_problem(path: string): int {
+    if (isFile(path)) {
+        return 0;
+    }
+    if (isDir(path)) {
+        return HR_ACCESS_DENIED;
+    }
+    let dir = parent_dir(path);
+    if (dir.len() > 0 and !isDir(dir)) {
+        return HR_PATH_NOT_FOUND;
+    }
+    return HR_FILE_NOT_FOUND;
+}
+
+# The HRESULT that writing `path` would fail with, or 0. An existing file is
+# only replaced with -f.
+pub func output_problem(path: string, force: bool): int {
+    if (isDir(path)) {
+        return HR_ACCESS_DENIED;
+    }
+    if (exists(path) and !force) {
+        return HR_FILE_EXISTS;
+    }
+    let dir = parent_dir(path);
+    if (dir.len() > 0 and !isDir(dir)) {
+        return HR_PATH_NOT_FOUND;
+    }
+    return 0;
+}
