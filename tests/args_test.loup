@@ -1,5 +1,12 @@
 @mode(host.dual)
 
+# Unit tests for certutil's argument parsing (cli.args): verbs in any
+# spelling, -f and -v, unknown `-words` and `/paths`, -? and --version.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test --no-parallel`, source/ on LOUPPATH), one
+# test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from cli.args import (parse_args, certutil_switches, VERBS);
 

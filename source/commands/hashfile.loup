@@ -6,6 +6,10 @@
 #   SHA256 hash of a.txt:
 #   2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 #   CertUtil: -hashfile command completed successfully.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code. The digests
+# are computed by the pure-Loup hash modules in hash/.
 
 from appinfo import (EXIT_OK);
 from cli.args import (Options);

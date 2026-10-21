@@ -8,6 +8,16 @@
 #   Input Length = 5
 #   Output Length = 66
 #   CertUtil: -encode command completed successfully.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code. The text and
+# byte transforms live in codec/; this module checks, reads, writes and
+# reports.
+#
+# Structure: the base64 types; choosing the encoder or decoder for a type;
+# check, the shared argument and file checks (it returns -1 and passes the
+# exit status back through `status`, a one-element list); finish_text and
+# finish_bytes, which write and report; and one run_* function per verb.
 
 from appinfo import (EXIT_OK);
 from cli.args import (Options);

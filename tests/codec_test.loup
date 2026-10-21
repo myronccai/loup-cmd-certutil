@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Unit tests for the codecs (codec.base64, codec.hexdump): the RFC 4648
+# base64 vectors, certificate framing, payload extraction, and every hex
+# dump format both ways.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test --no-parallel`, source/ on LOUPPATH), one
+# test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from codec.base64 import (base64_encode, base64_decode, certificate_text, framed_text, payload);
 from codec.hexdump import (hex_text, hex_decode, address, HEX, HEX_ASCII, HEX_ADDR, HEX_ASCII_ADDR,

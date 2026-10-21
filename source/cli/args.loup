@@ -10,6 +10,15 @@
 # (win/switches.loup), so `-hashfile`, `/HashFile` and `-HASHFILE` are the
 # same. Another `-word` before `--` is an unknown argument; `/x` that is not
 # a verb or option is a path.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: parse_args parses the whole command line for the verbs, -f and
+# the operands, then the part before `--` a second time to find the first
+# unknown `-word` (the shared parser treats it as an operand). The caller
+# reports unknown words and extra verbs, but only after handling -? and
+# --version.
 
 from win.switches import (SwitchSpec, flag, parse_switches);
 

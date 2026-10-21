@@ -1,7 +1,12 @@
 @mode(host.dual)
 
-# Known-answer tests from RFC 1321 (MD5) and FIPS 180-2 (SHA-1, SHA-2),
-# checked against md5sum, sha1sum, sha256sum, sha384sum and sha512sum.
+# Unit tests for the hash modules: known-answer tests from RFC 1321 (MD5)
+# and FIPS 180-2 (SHA-1, SHA-2), checked against md5sum, sha1sum,
+# sha256sum, sha384sum and sha512sum.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test --no-parallel`, source/ on LOUPPATH), one
+# test per `func test_*()`. It is not part of the binary.
 
 from debug.assert import (expect);
 from hash.md5 import (md5_hex);

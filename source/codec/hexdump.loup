@@ -10,6 +10,10 @@
 #   12  raw hex             48656c6c6f2c20776f726c64
 #
 # -decodehex reads any of them back.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code. Pure functions
+# over bytes and strings.
 
 from codec.base64 import (CRLF);
 from hash.common import (hex_word);

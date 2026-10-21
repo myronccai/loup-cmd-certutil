@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Unit tests for certutil's result lines (commands.results): the FAILED
+# line and Windows' message for each HRESULT, the success line and the
+# exit status an HRESULT becomes.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this file
+# with Stage0 (`loup-bootstrap test --no-parallel`, source/ on LOUPPATH), one
+# test per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from commands.results import (failure_lines, success_line, exit_code, HR_FILE_NOT_FOUND,
     HR_INVALID_DATA, HR_BAD_ALGID, HR_FILE_EXISTS);

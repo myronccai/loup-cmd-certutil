@@ -3,6 +3,9 @@
 # Checks made before reading or writing a file, so that every failure has
 # certutil's HRESULT. (In native builds of Loup 1.26.0 a failed read or
 # write cannot be caught, and some writes fail silently.)
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 from io.fs import (exists, isDir, isFile);
 from win.paths import (parent_dir);

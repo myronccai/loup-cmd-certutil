@@ -4,6 +4,10 @@
 # text with certificate header and footer lines and breaks it into lines of
 # 64 characters, all ending in CR LF; -decode accepts that framing (any
 # `-----BEGIN ...-----` line) or bare base64, and ignores whitespace.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code. Pure functions
+# over bytes and strings.
 
 pub const CERTIFICATE: string = "CERTIFICATE";
 pub const CRLF: string = "\r\n";

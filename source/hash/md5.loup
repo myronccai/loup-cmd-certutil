@@ -2,6 +2,14 @@
 
 # MD5 (RFC 1321) in pure Loup. 32-bit little-endian words, kept in Loup's
 # 64-bit int and masked to 32 bits.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: the step constants and rotations; compress, which mixes one
+# 64-byte block into the state; and md5_hex, which runs compress over every
+# full block of the data and then over the one or two padded tail blocks from
+# hash.common.padded_tail, so the message is never copied whole.
 
 from hash.common import (MASK32, rotl32, load_block, padded_tail, hex_word);
 
@@ -39,6 +47,8 @@ func compress(buf: list[int], kk: list[int], ss: list[int], edits m: list[int], 
     var b = h[1];
     var c = h[2];
     var d = h[3];
+    # Four rounds of 16 steps. Each round has its own mixing function f and
+    # its own order g in which it takes the 16 message words.
     for (i in 0..64) {
         var f = 0;
         var g = 0;

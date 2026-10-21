@@ -1,5 +1,11 @@
 @mode(host.dual)
 
+# The help texts of certutil: the overview (`certutil -?`), one verb's
+# usage (`certutil -VERB -?`), and the --version line.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code.
+
 from appinfo import (APP_NAME, APP_VERSION);
 
 # The text of `certutil -?`: a short summary of the supported verbs, in

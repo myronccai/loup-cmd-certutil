@@ -4,6 +4,15 @@
 # use the whole of Loup's int, which wraps on overflow like an unsigned
 # 64-bit word; right shifts are made logical with shr64, and nothing is
 # compared, so the sign never matters.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: the round constants; compress, which mixes one 128-byte block
+# into the state; digest, which runs compress over every full block of the
+# data and then over the one or two padded tail blocks from
+# hash.common.padded_tail; and the two entry points, which differ only in
+# their initial state and in how many words of it they print.
 
 from hash.common import (rotr64, shr64, word64, load_block, padded_tail, hex_word);
 
@@ -47,6 +56,8 @@ const ALL_ONES: int = -1;
 # Processes one 128-byte block (in buf) into the state h[0..8]; w is an
 # 80-word scratch list and k the round constants.
 func compress(buf: list[int], k: list[int], edits w: list[int], edits h: list[int]): void {
+    # The message schedule: the block's 16 big-endian 64-bit words,
+    # expanded to 80. Additions wrap at 64 bits by themselves.
     for (i in 0..16) {
         var word = 0;
         for (j in 0..8) {
@@ -67,6 +78,7 @@ func compress(buf: list[int], k: list[int], edits w: list[int], edits h: list[in
     var f = h[5];
     var g = h[6];
     var hh = h[7];
+    # 80 rounds, one per round constant.
     for (i in 0..80) {
         let s1 = rotr64(e, 14) ^ rotr64(e, 18) ^ rotr64(e, 41);
         let ch = (e & f) ^ ((e ^ ALL_ONES) & g);

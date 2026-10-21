@@ -4,6 +4,9 @@
 # wrapping on overflow): 32-bit words are kept in 0..2^32-1 by masking,
 # 64-bit words use the whole int. Sized integers (uint32, ...) would throw
 # on overflow, so they are not used.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 pub const MASK32: int = 0xFFFFFFFF;
 

@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Top level of certutil: parse the arguments, handle -? and --version,
+# reject unknown arguments and extra verbs, then dispatch to the verb and
+# return its ERRORLEVEL.
+#
+# Runtime: host.dual. Compiled into the native binary build/certutil by `make
+# build`; `loup run source/main.loup` interprets the same code, and the unit
+# tests call run() directly.
+
 from appinfo import (EXIT_OK);
 from cli.args import (Options, parse_args);
 from cli.usage import (usage, verb_usage, version_line);
