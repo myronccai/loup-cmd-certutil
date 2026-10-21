@@ -13,16 +13,20 @@
 
 from hash.common import (hex_word);
 
-pub const HR_FILE_NOT_FOUND: int = 0x80070002;
-pub const HR_PATH_NOT_FOUND: int = 0x80070003;
-pub const HR_ACCESS_DENIED: int = 0x80070005;
-pub const HR_INVALID_DATA: int = 0x8007000D;
-pub const HR_FILE_EXISTS: int = 0x80070050;
-pub const HR_INVALID_PARAMETER: int = 0x80070057;
-pub const HR_BAD_ALGID: int = 0x80090008;
+# An HRESULT: a 32-bit Windows status code, kept as a non-negative int
+# (0x80070002, not its signed value).
+pub type HResult = int;
+
+pub const HR_FILE_NOT_FOUND: HResult = 0x80070002;
+pub const HR_PATH_NOT_FOUND: HResult = 0x80070003;
+pub const HR_ACCESS_DENIED: HResult = 0x80070005;
+pub const HR_INVALID_DATA: HResult = 0x8007000D;
+pub const HR_FILE_EXISTS: HResult = 0x80070050;
+pub const HR_INVALID_PARAMETER: HResult = 0x80070057;
+pub const HR_BAD_ALGID: HResult = 0x80090008;
 
 # The symbolic part of the FAILED line.
-pub func hresult_name(hr: int): string {
+pub func hresult_name(hr: HResult): string {
     if (hr == HR_FILE_NOT_FOUND) {
         return "WIN32: 2 ERROR_FILE_NOT_FOUND";
     } else if (hr == HR_PATH_NOT_FOUND) {
@@ -40,7 +44,7 @@ pub func hresult_name(hr: int): string {
 }
 
 # Windows' message for the HRESULT.
-pub func hresult_message(hr: int): string {
+pub func hresult_message(hr: HResult): string {
     if (hr == HR_FILE_NOT_FOUND) {
         return "The system cannot find the file specified.";
     } else if (hr == HR_PATH_NOT_FOUND) {
@@ -59,7 +63,7 @@ pub func hresult_message(hr: int): string {
 
 # The exit status for an HRESULT: the 32-bit value as a signed number
 # (0x80070002 is -2147024894; a Linux shell sees its low 8 bits, 2).
-pub func exit_code(hr: int): int {
+pub func exit_code(hr: HResult): int {
     if (hr >= 0x80000000) {
         return hr - 0x100000000;
     }
@@ -67,7 +71,7 @@ pub func exit_code(hr: int): int {
 }
 
 # The two lines that report a failed verb (`verb` without its dash).
-pub func failure_lines(verb: string, hr: int): list[string] {
+pub func failure_lines(verb: string, hr: HResult): list[string] {
     return [
         "CertUtil: -" + verb + " command FAILED: 0x" + hex_word(hr, 8) + " (" + hresult_name(hr) + ")",
         "CertUtil: " + hresult_message(hr),
@@ -79,7 +83,7 @@ pub func success_line(verb: string): string {
 }
 
 # Prints a failure on standard error and returns its exit status.
-pub func fail(verb: string, hr: int): int {
+pub func fail(verb: string, hr: HResult): int {
     for (line in failure_lines(verb, hr)) {
         printErr(line);
     }

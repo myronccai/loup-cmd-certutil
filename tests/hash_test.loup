@@ -9,10 +9,13 @@
 # test per `func test_*()`. It is not part of the binary.
 
 from debug.assert import (expect);
+from core.random import (Random);
 from hash.md5 import (md5_hex);
 from hash.sha1 import (sha1_hex);
-from hash.sha256 import (sha256_hex);
-from hash.sha512 import (sha384_hex, sha512_hex);
+from hash.sha512 import (Sha384, sha384_hex, sha512_hex);
+from hash.common import (BlockHash);
+from hash.sha256 import (Sha256, sha256_hex);
+from commands.hashfile import (canonical_algorithm, hash_hex);
 
 func same(got: string, want: string, what: string): void {
     expect(got == want, what + ": got '" + got + "', want '" + want + "'");
@@ -59,4 +62,39 @@ func test_sha512(): void {
     same(sha512_hex(b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"),
         "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909",
         "896 bits: two blocks");
+}
+
+# runtime.crypto().sha256 (Stage0 only, so tests only) as an oracle on
+# ASCII texts whose lengths cross the 55/56/64-byte padding boundaries.
+func test_sha256_against_runtime_crypto(): void {
+    var rng = Random(256);
+    for (n in [0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 128, 200]) {
+        var values: list[int] = [];
+        var chars: list[string] = [];
+        safe {
+            for (_ in 0..n) {
+                let b = rng.intRange(32, 127);
+                values.push(b);
+                chars.push(str(char.of(b)));
+            }
+        }
+        same(sha256_hex(bytesFromInts(values)), runtime.crypto().sha256(chars.join("")),
+            "length " + str(n));
+    }
+}
+
+func test_hash_classes(): void {
+    let h: BlockHash = Sha256();
+    same(h.digest(b"abc"), sha256_hex(b"abc"), "through the base class");
+    let long = sha512_hex(b"abc");
+    expect(Sha384().digest(b"abc").len() == 96 and long.len() == 128, "SHA-384 keeps 6 of 8 words");
+}
+
+func test_hashfile_table(): void {
+    same(canonical_algorithm("sha256"), "SHA256", "any case");
+    same(canonical_algorithm("SHA3"), "", "unsupported");
+    same(hash_hex("MD5", b"abc"), md5_hex(b"abc"), "MD5");
+    same(hash_hex("SHA384", b"abc"), sha384_hex(b"abc"), "SHA384");
+    same(hash_hex("SHA512", b"abc"), sha512_hex(b"abc"), "SHA512");
+    same(hash_hex("other", b"abc"), sha1_hex(b"abc"), "SHA1 otherwise");
 }

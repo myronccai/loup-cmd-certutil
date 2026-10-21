@@ -15,9 +15,11 @@
 # reports.
 #
 # Structure: the base64 types; choosing the encoder or decoder for a type;
-# check, the shared argument and file checks (it returns -1 and passes the
-# exit status back through `status`, a one-element list); finish_text and
+# check, the shared argument and file checks; finish_text and
 # finish_bytes, which write and report; and one run_* function per verb.
+# The checks and the decoders return Results whose error is the HRESULT
+# to fail with, so each run_* function takes them with `attempt` inside
+# one try and reports any failure in its single `catch Err(hr)`.
 
 from appinfo import (EXIT_OK);
 from cli.args import (Options);
@@ -65,18 +67,25 @@ pub func encoded_text(data: bytes, kind: int): string {
     return hex_text(data, kind);
 }
 
-# The bytes -decodehex reads from text in a supported type ([-1] when the
-# text is not in that form).
-pub func decoded_values(text: string, kind: int): list[int] {
+# The bytes -decode and -decodehex read from text in a supported type, or
+# HR_INVALID_DATA when the text is not in that form. (The error of these
+# Results is an HRESULT, commands.results.HResult, spelled `int` because
+# an imported type alias cannot be named in a signature in Loup 1.26.0.)
+pub func decoded_values(text: string, kind: int): Result[list[int], int] {
+    var values: list[int]? = None;
     if (is_base64_type(kind)) {
-        return base64_decode(payload(text));
+        values = base64_decode(payload(text));
+    } else {
+        values = hex_decode(text);
     }
-    return hex_decode(text);
-}
-
-# Whether decoding failed.
-pub func is_bad(values: list[int]): bool {
-    return values.len() == 1 and values[0] < 0;
+    match values {
+        Some(v) => {
+            return Ok(v);
+        },
+        None => {
+            return Err(HR_INVALID_DATA);
+        },
+    }
 }
 
 func report(input_length: int, output_length: int, verb: string): int {
@@ -86,36 +95,36 @@ func report(input_length: int, output_length: int, verb: string): int {
     return EXIT_OK;
 }
 
-# The common checks: the argument count, the type (when allowed), the
-# input file, the output file. Returns the type, or -1 after reporting a
-# failure (then `status` holds the exit status).
-func check(opts: Options, verb: string, allow_type: bool, edits status: list[int]): int {
+# The common checks: the argument count (printing the verb's usage when it
+# is wrong), the type (when allowed), the input file, the output file.
+# Ok(type), or Err(the HRESULT to fail with).
+func check(opts: Options, verb: string, allow_type: bool): Result[int, int] {
     let n = opts.operands.len();
     let most = if (allow_type) { 3 } else { 2 };
-    var kind = HEX_ASCII_ADDR;
     if (n < 2 or n > most) {
         printErr(verb_usage(verb));
-        status[0] = fail(verb, HR_INVALID_PARAMETER);
-        return -1;
+        return Err(HR_INVALID_PARAMETER);
     }
+    var kind = HEX_ASCII_ADDR;
     if (n == 3) {
         kind = parse_int_value(opts.operands[2]) ?? -1;
         if (!valid_type(kind)) {
-            status[0] = fail(verb, HR_INVALID_PARAMETER);
-            return -1;
+            return Err(HR_INVALID_PARAMETER);
         }
     }
-    let problem = input_problem(fs_path(opts.operands[0]));
-    if (problem != 0) {
-        status[0] = fail(verb, problem);
-        return -1;
+    match input_problem(fs_path(opts.operands[0])) {
+        Some(hr) => {
+            return Err(hr);
+        },
+        None => {},
     }
-    let out_problem = output_problem(fs_path(opts.operands[1]), opts.force);
-    if (out_problem != 0) {
-        status[0] = fail(verb, out_problem);
-        return -1;
+    match output_problem(fs_path(opts.operands[1]), opts.force) {
+        Some(hr) => {
+            return Err(hr);
+        },
+        None => {},
     }
-    return kind;
+    return Ok(kind);
 }
 
 # Writes text output and reports.
@@ -139,47 +148,47 @@ func finish_bytes(verb: string, input_length: int, out: string, values: list[int
 }
 
 pub func run_encode(opts: Options): int {
-    var status = [0];
-    if (check(opts, "encode", false, edits: status) < 0) {
-        return status[0];
+    try {
+        let _ = attempt check(opts, "encode", false);
+        let data = readBytes(fs_path(opts.operands[0]));
+        return finish_text("encode", data.len(), fs_path(opts.operands[1]), certificate_text(data));
+    } catch Err(hr) {
+        return fail("encode", hr);
     }
-    let data = readBytes(fs_path(opts.operands[0]));
-    return finish_text("encode", data.len(), fs_path(opts.operands[1]), certificate_text(data));
 }
 
 pub func run_decode(opts: Options): int {
-    var status = [0];
-    if (check(opts, "decode", false, edits: status) < 0) {
-        return status[0];
+    try {
+        let _ = attempt check(opts, "decode", false);
+        let text = readText(fs_path(opts.operands[0]));
+        # Framed or bare base64 (payload() takes either).
+        let values = attempt decoded_values(text, B64_HEADER);
+        if (values.len() == 0) {
+            return fail("decode", HR_INVALID_DATA);
+        }
+        return finish_bytes("decode", text.byteLength(), fs_path(opts.operands[1]), values);
+    } catch Err(hr) {
+        return fail("decode", hr);
     }
-    let text = readText(fs_path(opts.operands[0]));
-    let values = base64_decode(payload(text));
-    if (is_bad(values) or values.len() == 0) {
-        return fail("decode", HR_INVALID_DATA);
-    }
-    return finish_bytes("decode", text.byteLength(), fs_path(opts.operands[1]), values);
 }
 
 pub func run_encodehex(opts: Options): int {
-    var status = [0];
-    let kind = check(opts, "encodehex", true, edits: status);
-    if (kind < 0) {
-        return status[0];
+    try {
+        let kind = attempt check(opts, "encodehex", true);
+        let data = readBytes(fs_path(opts.operands[0]));
+        return finish_text("encodehex", data.len(), fs_path(opts.operands[1]), encoded_text(data, kind));
+    } catch Err(hr) {
+        return fail("encodehex", hr);
     }
-    let data = readBytes(fs_path(opts.operands[0]));
-    return finish_text("encodehex", data.len(), fs_path(opts.operands[1]), encoded_text(data, kind));
 }
 
 pub func run_decodehex(opts: Options): int {
-    var status = [0];
-    let kind = check(opts, "decodehex", true, edits: status);
-    if (kind < 0) {
-        return status[0];
+    try {
+        let kind = attempt check(opts, "decodehex", true);
+        let text = readText(fs_path(opts.operands[0]));
+        let values = attempt decoded_values(text, kind);
+        return finish_bytes("decodehex", text.byteLength(), fs_path(opts.operands[1]), values);
+    } catch Err(hr) {
+        return fail("decodehex", hr);
     }
-    let text = readText(fs_path(opts.operands[0]));
-    let values = decoded_values(text, kind);
-    if (is_bad(values)) {
-        return fail("decodehex", HR_INVALID_DATA);
-    }
-    return finish_bytes("decodehex", text.byteLength(), fs_path(opts.operands[1]), values);
 }

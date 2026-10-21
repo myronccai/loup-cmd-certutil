@@ -109,9 +109,9 @@ pub func hex_text(data: bytes, kind: int): string {
 
 # Reads hexadecimal text in any of the formats back into byte values:
 # an offset up to a TAB is skipped, and in spaced formats only the hex
-# column (the first 48 characters) is read. Returns [-1] for text that is
-# not hexadecimal.
-pub func hex_decode(text: string): list[int] {
+# column (the first 48 characters) is read. None for text that is not
+# hexadecimal.
+pub func hex_decode(text: string): list[int]? {
     var out: list[int] = [];
     var high = -1;
     for (line in text.replace("\r", "").split("\n")) {
@@ -129,7 +129,7 @@ pub func hex_decode(text: string): list[int] {
             }
             let d = "0123456789abcdef".index_of(ch);
             if (d < 0) {
-                return [-1];
+                return None;
             }
             if (high < 0) {
                 high = d;
@@ -140,7 +140,7 @@ pub func hex_decode(text: string): list[int] {
         }
     }
     if (high >= 0) {
-        return [-1];
+        return None;
     }
-    return out;
+    return Some(out);
 }

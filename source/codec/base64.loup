@@ -28,8 +28,9 @@ func base64_pieces(data: bytes, break_after: int): list[string] {
     var group: list[string] = ["", "", "", ""];
     var column = 0;
     let n = data.len();
-    var i = 0;
-    while (i < n) {
+    # Three bytes give four characters; a last group of one or two bytes
+    # is padded with `=`.
+    for (var i = 0; i < n; i += 3) {
         let left = n - i;
         let b1 = if (left > 1) { data[i + 1] } else { 0 };
         let b2 = if (left > 2) { data[i + 2] } else { 0 };
@@ -46,7 +47,6 @@ func base64_pieces(data: bytes, break_after: int): list[string] {
                 column = 0;
             }
         }
-        i += 3;
     }
     if (break_after > 0 and column > 0) {
         out.push(CRLF);
@@ -104,9 +104,9 @@ pub func payload(text: string): string {
     return out.join("");
 }
 
-# Decodes base64 text (whitespace ignored, padding optional). Returns the
-# byte values, or a list holding -1 when the text is not base64.
-pub func base64_decode(text: string): list[int] {
+# Decodes base64 text (whitespace ignored, padding optional): the byte
+# values, or None when the text is not base64.
+pub func base64_decode(text: string): list[int]? {
     var values: list[int] = [];
     var pad = 0;
     for (ch in text) {
@@ -119,16 +119,17 @@ pub func base64_decode(text: string): list[int] {
         }
         let v = ALPHABET.index_of(ch);
         if (v < 0 or pad > 0) {
-            return [-1];
+            return None;
         }
         values.push(v);
     }
     if (pad > 2 or values.len() % 4 == 1 or (pad > 0 and (values.len() + pad) % 4 != 0)) {
-        return [-1];
+        return None;
     }
+    # Four characters give three bytes; a last group of two or three gives
+    # one or two.
     var out: list[int] = [];
-    var i = 0;
-    while (i < values.len()) {
+    for (var i = 0; i < values.len(); i += 4) {
         let left = values.len() - i;
         let a = values[i];
         let b = if (left > 1) { values[i + 1] } else { 0 };
@@ -142,7 +143,6 @@ pub func base64_decode(text: string): list[int] {
         if (left > 3) {
             out.push(v & 255);
         }
-        i += 4;
     }
-    return out;
+    return Some(out);
 }

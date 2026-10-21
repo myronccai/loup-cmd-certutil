@@ -11,30 +11,30 @@ from appinfo import (APP_NAME, APP_VERSION);
 # The text of `certutil -?`: a short summary of the supported verbs, in
 # this project's own words.
 pub func usage(): string {
-    let lines = [
-        "Usage: certutil [-f] [-v] -VERB ARGUMENTS",
-        "",
-        "Hashes files and converts them to and from base64 and hexadecimal.",
-        "",
-        "Verbs:",
-        "  -hashfile InFile [MD5|SHA1|SHA256|SHA384|SHA512]",
-        "                 Print the file's hash (SHA1 when no algorithm is given).",
-        "  -encode InFile OutFile",
-        "                 Write InFile as base64 between certificate header lines.",
-        "  -decode InFile OutFile",
-        "                 Write the bytes of a base64 file, framed or not.",
-        "  -encodehex InFile OutFile [Type]",
-        "                 Write a hexadecimal dump: Type 4, 5, 10, 11 (default),",
-        "                 12; or base64: 0 (certificate lines), 1, 3, 9.",
-        "  -decodehex InFile OutFile [Type]",
-        "                 Read such a dump (hexadecimal by default) back to bytes.",
-        "",
-        "Options:",
-        "  -f             Overwrite an existing OutFile.",
-        "  -v             Accepted; changes nothing.",
-        "  -VERB -?       Show the usage of one verb.",
-    ];
-    return lines.join("\n");
+    let text = """
+    Usage: certutil [-f] [-v] -VERB ARGUMENTS
+
+    Hashes files and converts them to and from base64 and hexadecimal.
+
+    Verbs:
+      -hashfile InFile [MD5|SHA1|SHA256|SHA384|SHA512]
+                     Print the file's hash (SHA1 when no algorithm is given).
+      -encode InFile OutFile
+                     Write InFile as base64 between certificate header lines.
+      -decode InFile OutFile
+                     Write the bytes of a base64 file, framed or not.
+      -encodehex InFile OutFile [Type]
+                     Write a hexadecimal dump: Type 4, 5, 10, 11 (default),
+                     12; or base64: 0 (certificate lines), 1, 3, 9.
+      -decodehex InFile OutFile [Type]
+                     Read such a dump (hexadecimal by default) back to bytes.
+
+    Options:
+      -f             Overwrite an existing OutFile.
+      -v             Accepted; changes nothing.
+      -VERB -?       Show the usage of one verb.
+    """;
+    return text;
 }
 
 # The usage of one verb (without its dash), printed for `-VERB -?` and

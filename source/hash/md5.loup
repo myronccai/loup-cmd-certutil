@@ -6,12 +6,11 @@
 # Runtime: host.dual. Compiled into the native binary build/certutil by `make
 # build`; `loup run source/main.loup` interprets the same code.
 #
-# Structure: the step constants and rotations; compress, which mixes one
-# 64-byte block into the state; and md5_hex, which runs compress over every
-# full block of the data and then over the one or two padded tail blocks from
-# hash.common.padded_tail, so the message is never copied whole.
+# Structure: the step constants and rotations; the Md5 class, a
+# hash.common.BlockHash whose compress() mixes one 64-byte block into the
+# state (the base class drives the blocks and the padding); and md5_hex.
 
-from hash.common import (MASK32, rotl32, load_block, padded_tail, hex_word);
+from hash.common import (BlockHash, MASK32, rotl32, zeros);
 
 # The per-step additive constants: floor(abs(sin(i + 1)) * 2^32).
 func step_constants(): list[int] {
@@ -37,79 +36,61 @@ func step_rotations(): list[int] {
     ];
 }
 
-# Processes one 64-byte block (in buf) into the state h[0..4].
-func compress(buf: list[int], kk: list[int], ss: list[int], edits m: list[int], edits h: list[int]): void {
-    for (i in 0..16) {
-        let j = i * 4;
-        m[i] = buf[j] | (buf[j + 1] << 8) | (buf[j + 2] << 16) | (buf[j + 3] << 24);
+pub class Md5 : BlockHash {
+    let kk: list[int];
+    let ss: list[int];
+    var m: list[int];   # the block as 16 little-endian words
+
+    new() {
+        # 64-byte blocks, an 8-byte length, 4-byte words, little-endian.
+        super([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476], 64, 8, 4, true);
+        this.kk = step_constants();
+        this.ss = step_rotations();
+        this.m = zeros(16);
     }
-    var a = h[0];
-    var b = h[1];
-    var c = h[2];
-    var d = h[3];
-    # Four rounds of 16 steps. Each round has its own mixing function f and
-    # its own order g in which it takes the 16 message words.
-    for (i in 0..64) {
-        var f = 0;
-        var g = 0;
-        if (i < 16) {
-            f = (b & c) | ((b ^ MASK32) & d);
-            g = i;
-        } else if (i < 32) {
-            f = (d & b) | ((d ^ MASK32) & c);
-            g = (5 * i + 1) % 16;
-        } else if (i < 48) {
-            f = b ^ c ^ d;
-            g = (3 * i + 5) % 16;
-        } else {
-            f = c ^ (b | (d ^ MASK32));
-            g = (7 * i) % 16;
+
+    pub override func compress(): void {
+        let buf = this.buf;
+        for (i in 0..16) {
+            let j = i * 4;
+            this.m[i] = buf[j] | (buf[j + 1] << 8) | (buf[j + 2] << 16) | (buf[j + 3] << 24);
         }
-        let t = d;
-        d = c;
-        c = b;
-        b = (b + rotl32((a + f + kk[i] + m[g]) & MASK32, ss[i])) & MASK32;
-        a = t;
+        var a = this.state[0];
+        var b = this.state[1];
+        var c = this.state[2];
+        var d = this.state[3];
+        # Four rounds of 16 steps. Each round has its own mixing function f and
+        # its own order g in which it takes the 16 message words.
+        for (i in 0..64) {
+            var f = 0;
+            var g = 0;
+            if (i < 16) {
+                f = (b & c) | ((b ^ MASK32) & d);
+                g = i;
+            } else if (i < 32) {
+                f = (d & b) | ((d ^ MASK32) & c);
+                g = (5 * i + 1) % 16;
+            } else if (i < 48) {
+                f = b ^ c ^ d;
+                g = (3 * i + 5) % 16;
+            } else {
+                f = c ^ (b | (d ^ MASK32));
+                g = (7 * i) % 16;
+            }
+            let t = d;
+            d = c;
+            c = b;
+            b = (b + rotl32((a + f + this.kk[i] + this.m[g]) & MASK32, this.ss[i])) & MASK32;
+            a = t;
+        }
+        this.state[0] = (this.state[0] + a) & MASK32;
+        this.state[1] = (this.state[1] + b) & MASK32;
+        this.state[2] = (this.state[2] + c) & MASK32;
+        this.state[3] = (this.state[3] + d) & MASK32;
     }
-    h[0] = (h[0] + a) & MASK32;
-    h[1] = (h[1] + b) & MASK32;
-    h[2] = (h[2] + c) & MASK32;
-    h[3] = (h[3] + d) & MASK32;
 }
 
 # The MD5 digest of the data as 32 lower-case hexadecimal digits.
 pub func md5_hex(data: bytes): string {
-    var h = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
-    let kk = step_constants();
-    let ss = step_rotations();
-    var buf: list[int] = [];
-    for (k in 0..64) {
-        buf.push(0);
-    }
-    var m: list[int] = [];
-    for (k in 0..16) {
-        m.push(0);
-    }
-    let full = data.len() / 64;
-    for (blk in 0..full) {
-        load_block(data, blk * 64, 64, edits: buf);
-        compress(buf, kk, ss, edits: m, edits: h);
-    }
-    let tail = padded_tail(data, 64, 8, true);
-    var start = 0;
-    while (start < tail.len()) {
-        for (k in 0..64) {
-            buf[k] = tail[start + k];
-        }
-        compress(buf, kk, ss, edits: m, edits: h);
-        start += 64;
-    }
-    var out: list[string] = [];
-    for (word in h) {
-        # Little-endian: the low byte first.
-        for (k in 0..4) {
-            out.push(hex_word((word >> (k * 8)) & 0xFF, 2));
-        }
-    }
-    return out.join("");
+    return Md5().digest(data);
 }

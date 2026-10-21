@@ -6,88 +6,69 @@
 # Runtime: host.dual. Compiled into the native binary build/certutil by `make
 # build`; `loup run source/main.loup` interprets the same code.
 #
-# Structure: compress, which mixes one 64-byte block into the state; and
-# sha1_hex, which runs compress over every full block of the data and then
-# over the one or two padded tail blocks from hash.common.padded_tail, so the
-# message is never copied whole.
+# Structure: the Sha1 class, a hash.common.BlockHash whose compress() mixes
+# one 64-byte block into the state (the base class drives the blocks and
+# the padding); and sha1_hex.
 
-from hash.common import (MASK32, rotl32, load_block, padded_tail, hex_word);
+from hash.common import (BlockHash, MASK32, rotl32, zeros);
 
-# Processes one 64-byte block (in buf) into the state h[0..5]; w is an
-# 80-word scratch list.
-func compress(buf: list[int], edits w: list[int], edits h: list[int]): void {
-    # The message schedule: the block's 16 words, expanded to 80.
-    for (i in 0..16) {
-        let j = i * 4;
-        w[i] = (buf[j] << 24) | (buf[j + 1] << 16) | (buf[j + 2] << 8) | buf[j + 3];
+pub class Sha1 : BlockHash {
+    var w: list[int];   # the message schedule: 80 words
+
+    new() {
+        # 64-byte blocks, an 8-byte length, 4-byte words, big-endian.
+        super([0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0], 64, 8, 4, false);
+        this.w = zeros(80);
     }
-    for (i in 16..80) {
-        w[i] = rotl32(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
-    }
-    var a = h[0];
-    var b = h[1];
-    var c = h[2];
-    var d = h[3];
-    var e = h[4];
-    # 80 rounds in four groups of 20, each with its own f and constant.
-    for (i in 0..80) {
-        var f = 0;
-        var k = 0;
-        if (i < 20) {
-            f = (b & c) | ((b ^ MASK32) & d);
-            k = 0x5a827999;
-        } else if (i < 40) {
-            f = b ^ c ^ d;
-            k = 0x6ed9eba1;
-        } else if (i < 60) {
-            f = (b & c) | (b & d) | (c & d);
-            k = 0x8f1bbcdc;
-        } else {
-            f = b ^ c ^ d;
-            k = 0xca62c1d6;
+
+    pub override func compress(): void {
+        let buf = this.buf;
+        # The message schedule: the block's 16 words, expanded to 80.
+        for (i in 0..16) {
+            let j = i * 4;
+            this.w[i] = (buf[j] << 24) | (buf[j + 1] << 16) | (buf[j + 2] << 8) | buf[j + 3];
         }
-        let t = (rotl32(a, 5) + f + e + k + w[i]) & MASK32;
-        e = d;
-        d = c;
-        c = rotl32(b, 30);
-        b = a;
-        a = t;
+        for (i in 16..80) {
+            this.w[i] = rotl32(this.w[i - 3] ^ this.w[i - 8] ^ this.w[i - 14] ^ this.w[i - 16], 1);
+        }
+        var a = this.state[0];
+        var b = this.state[1];
+        var c = this.state[2];
+        var d = this.state[3];
+        var e = this.state[4];
+        # 80 rounds in four groups of 20, each with its own f and constant.
+        for (i in 0..80) {
+            var f = 0;
+            var k = 0;
+            if (i < 20) {
+                f = (b & c) | ((b ^ MASK32) & d);
+                k = 0x5a827999;
+            } else if (i < 40) {
+                f = b ^ c ^ d;
+                k = 0x6ed9eba1;
+            } else if (i < 60) {
+                f = (b & c) | (b & d) | (c & d);
+                k = 0x8f1bbcdc;
+            } else {
+                f = b ^ c ^ d;
+                k = 0xca62c1d6;
+            }
+            let t = (rotl32(a, 5) + f + e + k + this.w[i]) & MASK32;
+            e = d;
+            d = c;
+            c = rotl32(b, 30);
+            b = a;
+            a = t;
+        }
+        this.state[0] = (this.state[0] + a) & MASK32;
+        this.state[1] = (this.state[1] + b) & MASK32;
+        this.state[2] = (this.state[2] + c) & MASK32;
+        this.state[3] = (this.state[3] + d) & MASK32;
+        this.state[4] = (this.state[4] + e) & MASK32;
     }
-    h[0] = (h[0] + a) & MASK32;
-    h[1] = (h[1] + b) & MASK32;
-    h[2] = (h[2] + c) & MASK32;
-    h[3] = (h[3] + d) & MASK32;
-    h[4] = (h[4] + e) & MASK32;
 }
 
 # The SHA-1 digest of the data as 40 lower-case hexadecimal digits.
 pub func sha1_hex(data: bytes): string {
-    var h = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
-    var buf: list[int] = [];
-    for (k in 0..64) {
-        buf.push(0);
-    }
-    var w: list[int] = [];
-    for (k in 0..80) {
-        w.push(0);
-    }
-    let full = data.len() / 64;
-    for (blk in 0..full) {
-        load_block(data, blk * 64, 64, edits: buf);
-        compress(buf, edits: w, edits: h);
-    }
-    let tail = padded_tail(data, 64, 8, false);
-    var start = 0;
-    while (start < tail.len()) {
-        for (k in 0..64) {
-            buf[k] = tail[start + k];
-        }
-        compress(buf, edits: w, edits: h);
-        start += 64;
-    }
-    var out: list[string] = [];
-    for (word in h) {
-        out.push(hex_word(word, 8));
-    }
-    return out.join("");
+    return Sha1().digest(data);
 }

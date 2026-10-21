@@ -8,13 +8,13 @@
 # Runtime: host.dual. Compiled into the native binary build/certutil by `make
 # build`; `loup run source/main.loup` interprets the same code.
 #
-# Structure: the round constants; compress, which mixes one 128-byte block
-# into the state; digest, which runs compress over every full block of the
-# data and then over the one or two padded tail blocks from
-# hash.common.padded_tail; and the two entry points, which differ only in
-# their initial state and in how many words of it they print.
+# Structure: the round constants; the Sha512 class, a
+# hash.common.BlockHash whose compress() mixes one 128-byte block into the
+# state; Sha384, a Sha512 with other initial values whose digest() keeps
+# the first 6 of the 8 words (super.digest() cut to 96 digits); and the
+# two entry points.
 
-from hash.common import (rotr64, shr64, word64, load_block, padded_tail, hex_word);
+from hash.common import (BlockHash, rotr64, shr64, word64, zeros);
 
 # The first 64 bits of the fractional parts of the cube roots of the first
 # 80 primes, as 32-bit halves (hex literals above 2^63 do not fit an int).
@@ -53,111 +53,106 @@ func round_constants(): list[int] {
 # All 64 bits set: x ^ ALL_ONES is the bitwise complement of x.
 const ALL_ONES: int = -1;
 
-# Processes one 128-byte block (in buf) into the state h[0..8]; w is an
-# 80-word scratch list and k the round constants.
-func compress(buf: list[int], k: list[int], edits w: list[int], edits h: list[int]): void {
-    # The message schedule: the block's 16 big-endian 64-bit words,
-    # expanded to 80. Additions wrap at 64 bits by themselves.
-    for (i in 0..16) {
-        var word = 0;
-        for (j in 0..8) {
-            word = (word << 8) | buf[i * 8 + j];
+pub class Sha512 : BlockHash {
+    let k: list[int];   # the round constants
+    var w: list[int];   # the message schedule: 80 words
+
+    # SHA-512 and SHA-384 differ only in their initial state (and in how
+    # much of the digest they keep).
+    new(initial: list[int]) {
+        # 128-byte blocks, a 16-byte length, 8-byte words, big-endian.
+        super(initial, 128, 16, 8, false);
+        this.k = round_constants();
+        this.w = zeros(80);
+    }
+
+    pub override func compress(): void {
+        let buf = this.buf;
+        # The message schedule: the block's 16 big-endian 64-bit words,
+        # expanded to 80. Additions wrap at 64 bits by themselves.
+        for (i in 0..16) {
+            var word = 0;
+            for (j in 0..8) {
+                word = (word << 8) | buf[i * 8 + j];
+            }
+            this.w[i] = word;
         }
-        w[i] = word;
+        for (i in 16..80) {
+            let w15 = this.w[i - 15];
+            let w2 = this.w[i - 2];
+            let s0 = rotr64(w15, 1) ^ rotr64(w15, 8) ^ shr64(w15, 7);
+            let s1 = rotr64(w2, 19) ^ rotr64(w2, 61) ^ shr64(w2, 6);
+            this.w[i] = this.w[i - 16] + s0 + this.w[i - 7] + s1;
+        }
+        var a = this.state[0];
+        var b = this.state[1];
+        var c = this.state[2];
+        var d = this.state[3];
+        var e = this.state[4];
+        var f = this.state[5];
+        var g = this.state[6];
+        var hh = this.state[7];
+        # 80 rounds, one per round constant.
+        for (i in 0..80) {
+            let s1 = rotr64(e, 14) ^ rotr64(e, 18) ^ rotr64(e, 41);
+            let ch = (e & f) ^ ((e ^ ALL_ONES) & g);
+            let t1 = hh + s1 + ch + this.k[i] + this.w[i];
+            let s0 = rotr64(a, 28) ^ rotr64(a, 34) ^ rotr64(a, 39);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0 + maj;
+            hh = g;
+            g = f;
+            f = e;
+            e = d + t1;
+            d = c;
+            c = b;
+            b = a;
+            a = t1 + t2;
+        }
+        this.state[0] = this.state[0] + a;
+        this.state[1] = this.state[1] + b;
+        this.state[2] = this.state[2] + c;
+        this.state[3] = this.state[3] + d;
+        this.state[4] = this.state[4] + e;
+        this.state[5] = this.state[5] + f;
+        this.state[6] = this.state[6] + g;
+        this.state[7] = this.state[7] + hh;
     }
-    for (i in 16..80) {
-        let s0 = rotr64(w[i - 15], 1) ^ rotr64(w[i - 15], 8) ^ shr64(w[i - 15], 7);
-        let s1 = rotr64(w[i - 2], 19) ^ rotr64(w[i - 2], 61) ^ shr64(w[i - 2], 6);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+
+    # Redeclared so that Sha384 can override it (a class may only override
+    # what its direct parent declares).
+    pub override func digest(data: bytes): string {
+        return super.digest(data);
     }
-    var a = h[0];
-    var b = h[1];
-    var c = h[2];
-    var d = h[3];
-    var e = h[4];
-    var f = h[5];
-    var g = h[6];
-    var hh = h[7];
-    # 80 rounds, one per round constant.
-    for (i in 0..80) {
-        let s1 = rotr64(e, 14) ^ rotr64(e, 18) ^ rotr64(e, 41);
-        let ch = (e & f) ^ ((e ^ ALL_ONES) & g);
-        let t1 = hh + s1 + ch + k[i] + w[i];
-        let s0 = rotr64(a, 28) ^ rotr64(a, 34) ^ rotr64(a, 39);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let t2 = s0 + maj;
-        hh = g;
-        g = f;
-        f = e;
-        e = d + t1;
-        d = c;
-        c = b;
-        b = a;
-        a = t1 + t2;
-    }
-    h[0] = h[0] + a;
-    h[1] = h[1] + b;
-    h[2] = h[2] + c;
-    h[3] = h[3] + d;
-    h[4] = h[4] + e;
-    h[5] = h[5] + f;
-    h[6] = h[6] + g;
-    h[7] = h[7] + hh;
 }
 
-# Runs SHA-512's compression over the padded data from the initial state
-# `h` and returns the first `words` words of the result in hexadecimal.
-func digest(data: bytes, h0: list[int], words: int): string {
-    var h = h0;
-    let k = round_constants();
-    var buf: list[int] = [];
-    for (n in 0..128) {
-        buf.push(0);
+# SHA-384: SHA-512 from other initial values, cut to 6 of the 8 words.
+pub class Sha384 : Sha512 {
+    new() {
+        super([
+            word64(0xcbbb9d5d, 0xc1059ed8), word64(0x629a292a, 0x367cd507),
+            word64(0x9159015a, 0x3070dd17), word64(0x152fecd8, 0xf70e5939),
+            word64(0x67332667, 0xffc00b31), word64(0x8eb44a87, 0x68581511),
+            word64(0xdb0c2e0d, 0x64f98fa7), word64(0x47b5481d, 0xbefa4fa4),
+        ]);
     }
-    var w: list[int] = [];
-    for (n in 0..80) {
-        w.push(0);
+
+    pub override func digest(data: bytes): string {
+        return super.digest(data).slice(0, 96);
     }
-    let full = data.len() / 128;
-    for (blk in 0..full) {
-        load_block(data, blk * 128, 128, edits: buf);
-        compress(buf, k, edits: w, edits: h);
-    }
-    let tail = padded_tail(data, 128, 16, false);
-    var start = 0;
-    while (start < tail.len()) {
-        for (n in 0..128) {
-            buf[n] = tail[start + n];
-        }
-        compress(buf, k, edits: w, edits: h);
-        start += 128;
-    }
-    var out: list[string] = [];
-    for (n in 0..words) {
-        out.push(hex_word(h[n], 16));
-    }
-    return out.join("");
 }
 
 # The SHA-512 digest of the data as 128 lower-case hexadecimal digits.
 pub func sha512_hex(data: bytes): string {
-    let h = [
+    return Sha512([
         word64(0x6a09e667, 0xf3bcc908), word64(0xbb67ae85, 0x84caa73b),
         word64(0x3c6ef372, 0xfe94f82b), word64(0xa54ff53a, 0x5f1d36f1),
         word64(0x510e527f, 0xade682d1), word64(0x9b05688c, 0x2b3e6c1f),
         word64(0x1f83d9ab, 0xfb41bd6b), word64(0x5be0cd19, 0x137e2179),
-    ];
-    return digest(data, h, 8);
+    ]).digest(data);
 }
 
-# The SHA-384 digest (SHA-512 with other initial values, cut to 6 words)
-# as 96 lower-case hexadecimal digits.
+# The SHA-384 digest of the data as 96 lower-case hexadecimal digits.
 pub func sha384_hex(data: bytes): string {
-    let h = [
-        word64(0xcbbb9d5d, 0xc1059ed8), word64(0x629a292a, 0x367cd507),
-        word64(0x9159015a, 0x3070dd17), word64(0x152fecd8, 0xf70e5939),
-        word64(0x67332667, 0xffc00b31), word64(0x8eb44a87, 0x68581511),
-        word64(0xdb0c2e0d, 0x64f98fa7), word64(0x47b5481d, 0xbefa4fa4),
-    ];
-    return digest(data, h, 6);
+    return Sha384().digest(data);
 }

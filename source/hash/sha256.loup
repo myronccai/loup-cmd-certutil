@@ -6,12 +6,12 @@
 # Runtime: host.dual. Compiled into the native binary build/certutil by `make
 # build`; `loup run source/main.loup` interprets the same code.
 #
-# Structure: the round constants; compress, which mixes one 64-byte block into
-# the state; and sha256_hex, which runs compress over every full block of the
-# data and then over the one or two padded tail blocks from
-# hash.common.padded_tail, so the message is never copied whole.
+# Structure: the round constants; the Sha256 class, a
+# hash.common.BlockHash whose compress() mixes one 64-byte block into the
+# state (the base class drives the blocks and the padding); and
+# sha256_hex.
 
-from hash.common import (MASK32, rotr32, load_block, padded_tail, hex_word);
+from hash.common import (BlockHash, MASK32, rotr32, zeros);
 
 # The first 32 bits of the fractional parts of the cube roots of the first
 # 64 primes.
@@ -28,83 +28,69 @@ func round_constants(): list[int] {
     ];
 }
 
-# Processes one 64-byte block (in buf) into the state h[0..8]; w is a
-# 64-word scratch list and k the round constants.
-func compress(buf: list[int], k: list[int], edits w: list[int], edits h: list[int]): void {
-    # The message schedule: the block's 16 words, expanded to 64.
-    for (i in 0..16) {
-        let j = i * 4;
-        w[i] = (buf[j] << 24) | (buf[j + 1] << 16) | (buf[j + 2] << 8) | buf[j + 3];
+pub class Sha256 : BlockHash {
+    let k: list[int];   # the round constants
+    var w: list[int];   # the message schedule: 64 words
+
+    new() {
+        # 64-byte blocks, an 8-byte length, 4-byte words, big-endian.
+        super([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+            0x5be0cd19], 64, 8, 4, false);
+        this.k = round_constants();
+        this.w = zeros(64);
     }
-    for (i in 16..64) {
-        let s0 = rotr32(w[i - 15], 7) ^ rotr32(w[i - 15], 18) ^ (w[i - 15] >> 3);
-        let s1 = rotr32(w[i - 2], 17) ^ rotr32(w[i - 2], 19) ^ (w[i - 2] >> 10);
-        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) & MASK32;
+
+    pub override func compress(): void {
+        let buf = this.buf;
+        # The message schedule: the block's 16 words, expanded to 64.
+        for (i in 0..16) {
+            let j = i * 4;
+            this.w[i] = (buf[j] << 24) | (buf[j + 1] << 16) | (buf[j + 2] << 8) | buf[j + 3];
+        }
+        for (i in 16..64) {
+            let w15 = this.w[i - 15];
+            let w2 = this.w[i - 2];
+            let s0 = rotr32(w15, 7) ^ rotr32(w15, 18) ^ (w15 >> 3);
+            let s1 = rotr32(w2, 17) ^ rotr32(w2, 19) ^ (w2 >> 10);
+            this.w[i] = (this.w[i - 16] + s0 + this.w[i - 7] + s1) & MASK32;
+        }
+        var a = this.state[0];
+        var b = this.state[1];
+        var c = this.state[2];
+        var d = this.state[3];
+        var e = this.state[4];
+        var f = this.state[5];
+        var g = this.state[6];
+        var hh = this.state[7];
+        # 64 rounds, one per round constant.
+        for (i in 0..64) {
+            let s1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
+            let ch = (e & f) ^ ((e ^ MASK32) & g);
+            let t1 = (hh + s1 + ch + this.k[i] + this.w[i]) & MASK32;
+            let s0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = (s0 + maj) & MASK32;
+            hh = g;
+            g = f;
+            f = e;
+            e = (d + t1) & MASK32;
+            d = c;
+            c = b;
+            b = a;
+            a = (t1 + t2) & MASK32;
+        }
+        this.state[0] = (this.state[0] + a) & MASK32;
+        this.state[1] = (this.state[1] + b) & MASK32;
+        this.state[2] = (this.state[2] + c) & MASK32;
+        this.state[3] = (this.state[3] + d) & MASK32;
+        this.state[4] = (this.state[4] + e) & MASK32;
+        this.state[5] = (this.state[5] + f) & MASK32;
+        this.state[6] = (this.state[6] + g) & MASK32;
+        this.state[7] = (this.state[7] + hh) & MASK32;
     }
-    var a = h[0];
-    var b = h[1];
-    var c = h[2];
-    var d = h[3];
-    var e = h[4];
-    var f = h[5];
-    var g = h[6];
-    var hh = h[7];
-    # 64 rounds, one per round constant.
-    for (i in 0..64) {
-        let s1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
-        let ch = (e & f) ^ ((e ^ MASK32) & g);
-        let t1 = (hh + s1 + ch + k[i] + w[i]) & MASK32;
-        let s0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
-        let maj = (a & b) ^ (a & c) ^ (b & c);
-        let t2 = (s0 + maj) & MASK32;
-        hh = g;
-        g = f;
-        f = e;
-        e = (d + t1) & MASK32;
-        d = c;
-        c = b;
-        b = a;
-        a = (t1 + t2) & MASK32;
-    }
-    h[0] = (h[0] + a) & MASK32;
-    h[1] = (h[1] + b) & MASK32;
-    h[2] = (h[2] + c) & MASK32;
-    h[3] = (h[3] + d) & MASK32;
-    h[4] = (h[4] + e) & MASK32;
-    h[5] = (h[5] + f) & MASK32;
-    h[6] = (h[6] + g) & MASK32;
-    h[7] = (h[7] + hh) & MASK32;
 }
 
 # The SHA-256 digest of the data as 64 lower-case hexadecimal digits.
 pub func sha256_hex(data: bytes): string {
-    var h = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
-    let k = round_constants();
-    var buf: list[int] = [];
-    for (n in 0..64) {
-        buf.push(0);
-    }
-    var w: list[int] = [];
-    for (n in 0..64) {
-        w.push(0);
-    }
-    let full = data.len() / 64;
-    for (blk in 0..full) {
-        load_block(data, blk * 64, 64, edits: buf);
-        compress(buf, k, edits: w, edits: h);
-    }
-    let tail = padded_tail(data, 64, 8, false);
-    var start = 0;
-    while (start < tail.len()) {
-        for (n in 0..64) {
-            buf[n] = tail[start + n];
-        }
-        compress(buf, k, edits: w, edits: h);
-        start += 64;
-    }
-    var out: list[string] = [];
-    for (word in h) {
-        out.push(hex_word(word, 8));
-    }
-    return out.join("");
+    return Sha256().digest(data);
 }

@@ -9,6 +9,8 @@
 # test per `func test_*()`. It is not part of the binary.
 
 from debug.assert import (expect, expectEq);
+from core.random import (Random);
+from system.text import (toBase64, fromBase64, toHex);
 from codec.base64 import (base64_encode, base64_decode, certificate_text, framed_text, payload);
 from codec.hexdump import (hex_text, hex_decode, address, HEX, HEX_ASCII, HEX_ADDR, HEX_ASCII_ADDR,
     HEX_RAW);
@@ -25,6 +27,18 @@ func ints(values: list[int]): string {
     return parts.join(",");
 }
 
+# A decoder's result as text: the byte values, or `none`.
+func decoded(values: list[int]?): string {
+    match values {
+        Some(v) => {
+            return ints(v);
+        },
+        None => {
+            return "none";
+        },
+    }
+}
+
 func test_base64_rfc4648(): void {
     same(base64_encode(b""), "", "empty");
     same(base64_encode(b"f"), "Zg==", "f");
@@ -35,13 +49,13 @@ func test_base64_rfc4648(): void {
 }
 
 func test_base64_decode(): void {
-    same(ints(base64_decode("Zm9vYmFy")), "102,111,111,98,97,114", "foobar");
-    same(ints(base64_decode("Zm9vYg==")), "102,111,111,98", "padding");
-    same(ints(base64_decode("Zm9vYg")), "102,111,111,98", "padding is optional");
-    same(ints(base64_decode("Zm9v\r\n Yg==")), "102,111,111,98", "whitespace ignored");
-    same(ints(base64_decode("Zm9v!")), "-1", "bad character");
-    same(ints(base64_decode("Zg=v")), "-1", "data after padding");
-    same(ints(base64_decode("Z")), "-1", "one character is not enough");
+    same(decoded(base64_decode("Zm9vYmFy")), "102,111,111,98,97,114", "foobar");
+    same(decoded(base64_decode("Zm9vYg==")), "102,111,111,98", "padding");
+    same(decoded(base64_decode("Zm9vYg")), "102,111,111,98", "padding is optional");
+    same(decoded(base64_decode("Zm9v\r\n Yg==")), "102,111,111,98", "whitespace ignored");
+    same(decoded(base64_decode("Zm9v!")), "none", "bad character");
+    same(decoded(base64_decode("Zg=v")), "none", "data after padding");
+    same(decoded(base64_decode("Z")), "none", "one character is not enough");
 }
 
 func test_certificate_framing(): void {
@@ -86,10 +100,49 @@ func test_address(): void {
 }
 
 func test_hex_decode(): void {
-    same(ints(hex_decode("4869\r\n")), "72,105", "raw");
-    same(ints(hex_decode("48 69  4a\r\n")), "72,105,74", "spaced");
+    same(decoded(hex_decode("4869\r\n")), "72,105", "raw");
+    same(decoded(hex_decode("48 69  4a\r\n")), "72,105,74", "spaced");
     let line = "0000\t48 69                                            Hi\r\n";
-    same(ints(hex_decode(line)), "72,105", "offset and text columns are skipped");
-    same(ints(hex_decode("486")), "-1", "odd digit count");
-    same(ints(hex_decode("zz")), "-1", "not hexadecimal");
+    same(decoded(hex_decode(line)), "72,105", "offset and text columns are skipped");
+    same(decoded(hex_decode("486")), "none", "odd digit count");
+    same(decoded(hex_decode("zz")), "none", "not hexadecimal");
+}
+
+# system.text's encoders (interpreters only, so tests only) as oracles for
+# the hand-written codecs, on byte strings from a seeded generator.
+func random_bytes(edits rng: Random, max_len: int): list[int] {
+    var out: list[int] = [];
+    safe {
+        let n = rng.intRange(0, max_len + 1);
+        for (_ in 0..n) {
+            out.push(rng.intRange(0, 256));
+        }
+    }
+    return out;
+}
+
+func test_base64_against_system_text(): void {
+    var rng = Random(14);
+    for (k in 0..120) {
+        let values = random_bytes(edits: rng, 100);
+        let data = bytesFromInts(values);
+        let text = base64_encode(data);
+        same(text, toBase64(data), "encode " + str(k));
+        same(decoded(base64_decode(text)), ints(values), "decode " + str(k));
+        expectEq(fromBase64(certificate_text(data).replace("-----BEGIN CERTIFICATE-----", "")
+            .replace("-----END CERTIFICATE-----", "").replace("\r\n", "")).unwrap().len(), values.len(),
+            "framed text is base64 " + str(k));
+    }
+}
+
+func test_hex_against_system_text(): void {
+    var rng = Random(41);
+    for (k in 0..120) {
+        let values = random_bytes(edits: rng, 60);
+        let data = bytesFromInts(values);
+        let raw = hex_text(data, HEX_RAW);
+        let want = if (values.len() == 0) { "" } else { toHex(data) + "\r\n" };
+        same(raw, want, "raw hex " + str(k));
+        same(decoded(hex_decode(hex_text(data, HEX_ASCII_ADDR))), ints(values), "round trip " + str(k));
+    }
 }

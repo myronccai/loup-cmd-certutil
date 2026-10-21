@@ -1,12 +1,17 @@
 @mode(host.dual)
 
-# Helpers shared by the hash cores. Every value is a Loup `int` (64 bits,
-# wrapping on overflow): 32-bit words are kept in 0..2^32-1 by masking,
-# 64-bit words use the whole int. Sized integers (uint32, ...) would throw
-# on overflow, so they are not used.
+# What the hash cores share: word helpers and BlockHash, the abstract
+# Merkle-Damgard driver each hash class extends. Every value is a Loup
+# `int` (64 bits, wrapping on overflow): 32-bit words are kept in
+# 0..2^32-1 by masking, 64-bit words use the whole int. Sized integers
+# (uint32, ...) would throw on overflow, so they are not used.
 #
 # Runtime: host.dual. Compiled into the native binary build/certutil by `make
 # build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: word rotations and shifts; hexadecimal words; message padding;
+# then BlockHash, whose digest() feeds every block to the subclass's
+# compress() and turns the final state into hexadecimal.
 
 pub const MASK32: int = 0xFFFFFFFF;
 
@@ -41,29 +46,11 @@ const HEX: string = "0123456789abcdef";
 # significant first.
 pub func hex_word(x: int, nibbles: int): string {
     var parts: list[string] = [];
-    var shift = (nibbles - 1) * 4;
-    while (shift >= 0) {
+    for (var shift = (nibbles - 1) * 4; shift >= 0; shift -= 4) {
         let d = (x >> shift) & 15;
         parts.push(HEX.slice(d, d + 1));
-        shift -= 4;
     }
     return parts.join("");
-}
-
-# Lower-case hexadecimal of bytes (values 0..255).
-pub func hex_bytes(values: list[int]): string {
-    var parts: list[string] = [];
-    for (v in values) {
-        parts.push(hex_word(v, 2));
-    }
-    return parts.join("");
-}
-
-# Copies `count` bytes of data starting at `offset` into buf[0..count].
-pub func load_block(data: bytes, offset: int, count: int, edits buf: list[int]): void {
-    for (k in 0..count) {
-        buf[k] = data[offset + k];
-    }
 }
 
 # The padded tail of a message for a Merkle-Damgard hash: the bytes after
@@ -93,11 +80,81 @@ pub func padded_tail(data: bytes, block: int, len_bytes: int, little_endian: boo
             tail.push(v);
         }
     } else {
-        var k = len_bytes - 1;
-        while (k >= 0) {
+        for (var k = len_bytes - 1; k >= 0; k -= 1) {
             tail.push(lenb[k]);
-            k -= 1;
         }
     }
     return tail;
+}
+
+# A list of n zeros.
+pub func zeros(n: int): list[int] {
+    var out: list[int] = [];
+    for (_ in 0..n) {
+        out.push(0);
+    }
+    return out;
+}
+
+# A Merkle-Damgard hash: the message goes through compress() one block at
+# a time, the last block or two padded with padded_tail(), and the digest
+# is the final state, word by word in the hash's byte order. A subclass
+# sets the sizes and the initial state in its constructor and supplies
+# compress(); Sha384 also shortens digest().
+pub abstract class BlockHash {
+    pub var state: list[int];   # the chaining words
+    var buf: list[int];         # the block being mixed in, reused
+    let block_size: int;        # bytes per block: 64 or 128
+    let length_bytes: int;      # size of the bit-length field: 8 or 16
+    let word_bytes: int;        # 4 or 8
+    let little_endian: bool;    # MD5: words and length low byte first
+
+    new(state: list[int], block_size: int, length_bytes: int, word_bytes: int,
+        little_endian: bool) {
+        this.state = state;
+        this.buf = zeros(block_size);
+        this.block_size = block_size;
+        this.length_bytes = length_bytes;
+        this.word_bytes = word_bytes;
+        this.little_endian = little_endian;
+    }
+
+    # Mixes the block in `buf` into `state`. (Abstract methods stay void:
+    # natively an abstract method that returns a value returns 0.)
+    abstract func compress(): void;
+
+    # The digest of the data as lower-case hexadecimal: every full block
+    # straight from the data, then the one or two padded tail blocks, so
+    # the message is never copied whole.
+    pub func digest(data: bytes): string {
+        let size = this.block_size;
+        let full = data.len() / size;
+        for (blk in 0..full) {
+            for (k in 0..size) {
+                this.buf[k] = data[blk * size + k];
+            }
+            this.compress();
+        }
+        let tail = padded_tail(data, size, this.length_bytes, this.little_endian);
+        for (var start = 0; start < tail.len(); start += size) {
+            for (k in 0..size) {
+                this.buf[k] = tail[start + k];
+            }
+            this.compress();
+        }
+        return this.hex();
+    }
+
+    # The state as hexadecimal, each word's bytes in the hash's order.
+    pub func hex(): string {
+        var out: list[int] = [];
+        let n = this.word_bytes;
+        for (word in this.state) {
+            for (k in 0..n) {
+                let shift = if (this.little_endian) { k * 8 } else { (n - 1 - k) * 8 };
+                out.push((word >> shift) & 0xFF);
+            }
+        }
+        return bytesFromInts(out).toHex();
+    }
 }

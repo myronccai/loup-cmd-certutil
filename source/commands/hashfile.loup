@@ -24,29 +24,34 @@ from win.paths import (display_path, fs_path);
 
 pub const DEFAULT_ALGORITHM: string = "SHA1";
 
+# The algorithms -hashfile supports, as certutil prints them, and the hash
+# function of each, in the same order: one table instead of an if-chain
+# per question.
+const ALGORITHMS: list[string] = ["MD5", "SHA1", "SHA256", "SHA384", "SHA512"];
+
+func hash_functions(): list[fn(bytes): string] {
+    return [md5_hex, sha1_hex, sha256_hex, sha384_hex, sha512_hex];
+}
+
 # The algorithm's name as certutil prints it, or "" when it is not
 # supported here.
 pub func canonical_algorithm(name: string): string {
     let upper = name.toUpperCase();
-    if (upper == "MD5" or upper == "SHA1" or upper == "SHA256" or upper == "SHA384"
-        or upper == "SHA512") {
+    if (ALGORITHMS.contains(upper)) {
         return upper;
     }
     return "";
 }
 
-# The digest of the data in hexadecimal, for a canonical algorithm name.
+# The digest of the data in hexadecimal, for a canonical algorithm name
+# (SHA1 for any other).
 pub func hash_hex(algorithm: string, data: bytes): string {
-    if (algorithm == "MD5") {
-        return md5_hex(data);
-    } else if (algorithm == "SHA256") {
-        return sha256_hex(data);
-    } else if (algorithm == "SHA384") {
-        return sha384_hex(data);
-    } else if (algorithm == "SHA512") {
-        return sha512_hex(data);
+    var k = ALGORITHMS.index_of(algorithm);
+    if (k < 0) {
+        k = ALGORITHMS.index_of(DEFAULT_ALGORITHM);
     }
-    return sha1_hex(data);
+    let hash = hash_functions()[k];
+    return hash(data);
 }
 
 pub func run_hashfile(opts: Options): int {
@@ -60,9 +65,11 @@ pub func run_hashfile(opts: Options): int {
         return fail("hashfile", HR_BAD_ALGID);
     }
     let path = fs_path(opts.operands[0]);
-    let problem = input_problem(path);
-    if (problem != 0) {
-        return fail("hashfile", problem);
+    match input_problem(path) {
+        Some(hr) => {
+            return fail("hashfile", hr);
+        },
+        None => {},
     }
     let digest = hash_hex(algorithm, readBytes(path));
     println(algorithm + " hash of " + display_path(opts.operands[0]) + ":");
